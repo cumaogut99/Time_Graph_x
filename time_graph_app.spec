@@ -41,19 +41,35 @@ except:
     pass
 
 try:
-    # Pandas veri dosyaları
-    datas += collect_data_files('pandas')
+    # Add pandas and numpy data files
+    datas += collect_data_files('polars')
+    datas += collect_data_files('numpy')
+    
+    # Add matplotlib data files (e.g., fonts, styles)
 except:
     pass
 
 # Gizli importları topla
 hiddenimports = []
 try:
+    # Collect all submodules for key libraries
     hiddenimports += collect_submodules('PyQt5')
-    hiddenimports += collect_submodules('matplotlib')
-    hiddenimports += collect_submodules('pandas')
     hiddenimports += collect_submodules('numpy')
-    hiddenimports += collect_submodules('vaex')
+    hiddenimports += collect_submodules('polars')
+    hiddenimports += collect_submodules('matplotlib')
+    hiddenimports += collect_submodules('pyqtgraph')
+    hiddenimports += collect_submodules('scipy')
+    
+    # Add specific hidden imports that might be missed
+    hiddenimports += [
+        'scipy.special._cdflib',
+        'scipy.integrate',
+        'scipy.interpolate',
+        'scipy.signal',
+        'polars.libs'
+    ]
+    
+    # Optional: Add any other necessary hidden imports
 except:
     pass
 

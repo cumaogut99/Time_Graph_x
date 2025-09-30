@@ -1,0 +1,24 @@
+[
+  {
+    "timestamp": "2025-09-24T00:33:49.244388",
+    "total_files": 3732,
+    "total_lines": 1078174,
+    "issues_count": {
+      "import_error": 126,
+      "syntax_error": 0,
+      "dependency_missing": 0,
+      "circular_import": 53,
+      "unused_import": 5231,
+      "complexity_high": 1626,
+      "duplicate_code": 0,
+      "security_issue": 0,
+      "performance_issue": 0,
+      "code_smell": 3057
+    },
+    "complexity_score": 43.569131832797424,
+    "test_coverage": 8.092175777063238,
+    "dependency_health": 0,
+    "overall_score": 0,
+    "trend": "stable"
+  }
+]
