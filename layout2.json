@@ -1,0 +1,21 @@
+{
+    "tabs": [
+        {
+            "name": "Tab 1",
+            "graphs": [
+                {
+                    "signals": [
+                        "Sensor_1",
+                        "Sensor_2"
+                    ]
+                },
+                {
+                    "signals": [
+                        "Sensor_2",
+                        "Sensor_3"
+                    ]
+                }
+            ]
+        }
+    ]
+}
