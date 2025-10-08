@@ -1,0 +1,38 @@
+{
+    "tabs": [
+        {
+            "name": "Tab 1",
+            "graphs": [
+                {
+                    "signals": [
+                        "sine_1hz",
+                        "sine_5hz"
+                    ]
+                },
+                {
+                    "signals": [
+                        "noisy_signal",
+                        "square_wave"
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "Tab 2",
+            "graphs": [
+                {
+                    "signals": [
+                        "sine_10hz",
+                        "noisy_signal"
+                    ]
+                },
+                {
+                    "signals": [
+                        "chirp",
+                        "random_walk"
+                    ]
+                }
+            ]
+        }
+    ]
+}
