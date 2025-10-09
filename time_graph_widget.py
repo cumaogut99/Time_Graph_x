@@ -1527,6 +1527,21 @@ class TimeGraphWidget(QWidget):
             if active_tab_index < 0 or active_tab_index >= len(self.graph_containers):
                 logger.warning("[FILTER DEBUG] No active tab for filter application")
                 return
+            
+            # Check if filter can be applied
+            mode = filter_data.get('mode', 'segmented')
+            can_apply, reason = self.filter_manager.can_apply_filter(mode, active_tab_index)
+            
+            if not can_apply:
+                logger.warning(f"[FILTER MODE] Filter cannot be applied: {reason}")
+                # Show warning to user
+                from PyQt5.QtWidgets import QMessageBox
+                QMessageBox.warning(
+                    self,
+                    "Filter Uygulanamıyor",
+                    f"<b>Filter uygulanamıyor!</b><br><br>{reason}"
+                )
+                return
                 
             container = self.graph_containers[active_tab_index]
             logger.info(f"[FILTER DEBUG] Container: {container}")

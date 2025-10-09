@@ -192,6 +192,10 @@ class FilterManager:
         self._last_calculation_time = 0
         self._calculation_debounce_ms = 500  # 500ms debounce
         self._pending_calculation = False
+        
+        # Concatenated mode tracking - global state
+        self.is_concatenated_mode_active = False
+        self.concatenated_filter_tab = None  # Which tab has concatenated filter
     
     def calculate_filter_segments_threaded(self, all_signals: dict, conditions: list, callback=None):
         """Calculate time segments that satisfy all filter conditions in background thread."""
@@ -486,11 +490,23 @@ class FilterManager:
         logger.info("[FILTER DEBUG] Clearing all active filters")
         self.active_filters.clear()
         self.filter_applied = False
+        
+        # Reset concatenated mode
+        self.is_concatenated_mode_active = False
+        self.concatenated_filter_tab = None
+        logger.info("[FILTER MODE] Concatenated mode deactivated")
     
     def save_filter_state(self, tab_index: int, filter_data: dict):
         """Save filter state for a specific tab."""
         self.active_filters[tab_index] = filter_data.copy()
         self.filter_applied = True
+        
+        # Track concatenated mode
+        if filter_data.get('mode') == 'concatenated':
+            self.is_concatenated_mode_active = True
+            self.concatenated_filter_tab = tab_index
+            logger.info(f"[FILTER MODE] Concatenated mode activated for tab {tab_index}")
+        
         logger.info(f"[FILTER DEBUG] Saved filter state for tab {tab_index}")
     
     def get_filter_state(self, tab_index: int) -> dict:
@@ -500,6 +516,50 @@ class FilterManager:
     def get_active_filters(self) -> dict:
         """Get all active filters."""
         return self.active_filters.copy()
+    
+    def can_apply_filter(self, mode: str, tab_index: int = None) -> tuple[bool, str]:
+        """
+        Check if a filter can be applied.
+        
+        Returns:
+            (can_apply, reason) - True if filter can be applied, False with reason if not
+        """
+        # If trying to apply concatenated mode
+        if mode == 'concatenated':
+            # Check if another concatenated mode is already active
+            if self.is_concatenated_mode_active:
+                if self.concatenated_filter_tab != tab_index:
+                    return False, f"Concatenated mode is already active on Tab {self.concatenated_filter_tab + 1}. Please clear that filter first."
+                # Same tab, allow update
+                return True, ""
+            # Check if any other filters are active
+            if self.active_filters:
+                return False, "Other filters are active. Concatenated mode requires all other filters to be cleared first."
+            return True, ""
+        
+        # If trying to apply segmented mode or other filters
+        else:
+            # Check if concatenated mode is active
+            if self.is_concatenated_mode_active:
+                return False, f"Concatenated mode is active on Tab {self.concatenated_filter_tab + 1}. This mode prevents other filters from being applied. Please clear the concatenated filter first."
+            return True, ""
+    
+    def remove_filter(self, tab_index: int):
+        """Remove filter for a specific tab."""
+        if tab_index in self.active_filters:
+            filter_data = self.active_filters[tab_index]
+            
+            # If removing concatenated mode, reset state
+            if filter_data.get('mode') == 'concatenated':
+                self.is_concatenated_mode_active = False
+                self.concatenated_filter_tab = None
+                logger.info("[FILTER MODE] Concatenated mode deactivated")
+            
+            del self.active_filters[tab_index]
+            logger.info(f"[FILTER DEBUG] Removed filter for tab {tab_index}")
+            
+            # Update filter_applied flag
+            self.filter_applied = len(self.active_filters) > 0
     
     def has_active_filters(self) -> bool:
         """Check if there are any active filters."""
