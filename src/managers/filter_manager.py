@@ -256,32 +256,72 @@ class FilterManager:
     def _stop_calculation(self):
         """Stop any running calculation."""
         try:
+            # First stop the worker
             if self.calculation_worker:
                 self.calculation_worker.stop()
+                logger.debug("Worker stop signal sent")
                 
+            # Then handle the thread
             if self.calculation_thread:
                 try:
                     # Check if thread object is still valid
                     if self.calculation_thread.isRunning():
                         logger.info("Stopping running filter calculation thread...")
+                        
+                        # Disconnect signals first to prevent issues
+                        try:
+                            if self.calculation_worker:
+                                self.calculation_worker.finished.disconnect()
+                                self.calculation_worker.error.disconnect()
+                                self.calculation_worker.progress.disconnect()
+                            self.calculation_thread.started.disconnect()
+                        except (RuntimeError, TypeError):
+                            pass  # Signals may already be disconnected
+                        
                         self.calculation_thread.quit()
                         
-                        # Wait for thread to finish
-                        if not self.calculation_thread.wait(3000):
+                        # Wait for thread to finish with timeout
+                        if not self.calculation_thread.wait(5000):  # Increased timeout
                             logger.warning("Filter calculation thread did not finish, terminating...")
                             self.calculation_thread.terminate()
-                            self.calculation_thread.wait(1000)
+                            self.calculation_thread.wait(2000)  # Wait for termination
                         
                         logger.info("Filter calculation thread stopped")
+                    else:
+                        logger.debug("Filter calculation thread was not running")
+                        
                 except RuntimeError as e:
                     # Thread nesnesi zaten silinmiş, sorun değil
                     logger.debug(f"Thread already deleted during stop: {e}")
+                    
+            # Clean up worker and thread references
+            self.calculation_worker = None
+            self.calculation_thread = None
+            
         except Exception as e:
             logger.debug(f"Error stopping calculation (may already be stopped): {e}")
     
     def _on_calculation_error(self, error_msg: str):
         """Handle calculation error."""
         logger.error(f"Filter calculation error: {error_msg}")
+    
+    def cleanup(self):
+        """Cleanup filter manager resources."""
+        try:
+            logger.debug("FilterManager cleanup started")
+            self._cleanup_in_progress = True
+            
+            # Stop any running calculation
+            self._stop_calculation()
+            
+            # Reset references
+            self._reset_thread_references()
+            
+            logger.debug("FilterManager cleanup completed")
+        except Exception as e:
+            logger.error(f"Error during FilterManager cleanup: {e}")
+        finally:
+            self._cleanup_in_progress = False
     
     def calculate_filter_segments(self, all_signals: dict, conditions: list) -> list:
         
