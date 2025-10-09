@@ -29,21 +29,30 @@ class FilterCalculationWorker(QObject):
     def run(self):
         """Calculate filter segments."""
         try:
+            logger.debug("[WORKER DEBUG] FilterCalculationWorker.run() started")
             self._is_running = True
             
             if self.should_stop:
+                logger.debug("[WORKER DEBUG] Worker stopped before calculation")
                 return
                 
+            logger.debug("[WORKER DEBUG] Starting segment calculation...")
             segments = self._calculate_segments()
+            logger.debug(f"[WORKER DEBUG] Calculated {len(segments)} segments")
             
             if not self.should_stop:
+                logger.debug("[WORKER DEBUG] Emitting finished signal")
                 self.finished.emit(segments)
+            else:
+                logger.debug("[WORKER DEBUG] Worker stopped, not emitting signal")
         except Exception as e:
-            logger.error(f"Error in filter calculation: {e}")
+            logger.error(f"[WORKER DEBUG] Error in filter calculation: {e}")
             if not self.should_stop:
+                logger.debug("[WORKER DEBUG] Emitting error signal")
                 self.error.emit(str(e))
         finally:
             self._is_running = False
+            logger.debug("[WORKER DEBUG] FilterCalculationWorker.run() finished")
     
     def stop(self):
         """Stop the calculation."""
@@ -59,16 +68,20 @@ class FilterCalculationWorker(QObject):
         logger.info(f"[FILTER DEBUG] Calculating segments for {len(self.conditions)} conditions")
         
         if not self.conditions or not self.all_signals:
+            logger.debug("[WORKER DEBUG] No conditions or signals, returning empty")
             return []
         
         # Get time data from first available signal
         time_data = None
-        for signal_data in self.all_signals.values():
+        logger.debug(f"[WORKER DEBUG] Available signals: {list(self.all_signals.keys())}")
+        for signal_name, signal_data in self.all_signals.items():
             if 'x_data' in signal_data and len(signal_data['x_data']) > 0:
                 time_data = np.array(signal_data['x_data'])
+                logger.debug(f"[WORKER DEBUG] Using time data from signal: {signal_name}, length: {len(time_data)}")
                 break
         
         if time_data is None:
+            logger.debug("[WORKER DEBUG] No time data found, returning empty")
             return []
         
         # Create a boolean mask for all time points
@@ -279,12 +292,17 @@ class FilterManager:
     def _safe_callback_execution(self, callback, segments):
         """Safely execute callback with error handling."""
         try:
+            logger.debug(f"[WORKER DEBUG] _safe_callback_execution called with {len(segments)} segments")
             if not self._cleanup_in_progress and callback:
+                logger.debug("[WORKER DEBUG] Executing callback")
                 callback(segments)
+                logger.debug("[WORKER DEBUG] Callback executed successfully")
+            else:
+                logger.debug(f"[WORKER DEBUG] Callback not executed - cleanup_in_progress: {self._cleanup_in_progress}, callback: {callback is not None}")
         except RuntimeError as e:
-            logger.warning(f"Callback execution failed (object may be deleted): {e}")
+            logger.warning(f"[WORKER DEBUG] Callback execution failed (object may be deleted): {e}")
         except Exception as e:
-            logger.error(f"Error in filter callback: {e}")
+            logger.error(f"[WORKER DEBUG] Error in filter callback: {e}")
     
     def _reset_thread_references(self):
         """Reset thread references after cleanup."""
