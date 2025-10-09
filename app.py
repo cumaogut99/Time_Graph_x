@@ -35,6 +35,14 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
+# PyQtGraph patch'i uygula - autoRangeEnabled AttributeError sorununu çöz
+try:
+    from src.utils.pyqtgraph_patch import apply_pyqtgraph_patch
+    apply_pyqtgraph_patch()
+except ImportError as e:
+    print(f"PyQtGraph patch yüklenemedi: {e}")
+    # Patch yüklenemese bile devam et
+
 try:
     # ORİJİNAL VERSİYON - Kararlı ve test edilmiş
     from time_graph_widget import TimeGraphWidget  # Orijinal stabil versiyon

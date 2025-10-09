@@ -1555,6 +1555,10 @@ class TimeGraphWidget(QWidget):
                 # Clear filter state
                 self.filter_manager.remove_filter(active_tab_index)
                 
+                # Filtre durumunu widget container manager'dan da temizle
+                if hasattr(self, 'parent') and hasattr(self.parent, 'widget_container_manager'):
+                    self.parent.widget_container_manager.save_current_filter_state()
+                
                 # SADECE concatenated ise orijinal veriyi restore et
                 if was_concatenated and self.signal_processor:
                     logger.info("[FILTER DEBUG] Restoring original signal data (was concatenated filter)")
@@ -1676,6 +1680,11 @@ class TimeGraphWidget(QWidget):
             # Save filter state using filter manager
             self.filter_manager.save_filter_state(active_tab_index, filter_data)
             
+            # Filtre durumunu widget container manager'a da kaydet
+            # Bu sayede dosya değiştirme sırasında filtreler korunur
+            if hasattr(self, 'parent') and hasattr(self.parent, 'widget_container_manager'):
+                self.parent.widget_container_manager.save_current_filter_state()
+            
             # Update graph renderer with current signal mapping
             self.graph_renderer.graph_signal_mapping = self.graph_signal_mapping
             
@@ -1724,6 +1733,45 @@ class TimeGraphWidget(QWidget):
             msg.setText(f"Error applying filter: {str(e)}")
             msg.setWindowTitle("Filter Error")
             msg.exec_()
+    
+    def _restore_filter_ui_state(self, saved_filters: dict):
+        """
+        Kaydedilmiş filtre durumunu UI'da geri yükle.
+        Widget container manager tarafından çağrılır.
+        
+        Args:
+            saved_filters: Kaydedilmiş filtre durumu
+        """
+        try:
+            logger.info(f"Restoring filter UI state: {len(saved_filters)} saved filters")
+            
+            if not saved_filters:
+                logger.debug("No saved filters to restore")
+                return
+            
+            # Her tab için filtre durumunu geri yükle
+            for tab_index, filter_data in saved_filters.items():
+                try:
+                    # Filter panel'ı bul ve durumu geri yükle
+                    if hasattr(self, 'parameters_panel') and self.parameters_panel:
+                        # Parameters panel'daki filter panel'ları kontrol et
+                        for widget in self.parameters_panel.findChildren(QWidget):
+                            if hasattr(widget, 'graph_index') and hasattr(widget, 'set_range_filter_conditions'):
+                                # Bu widget'ın graph_index'i ile tab_index'i eşleştir
+                                widget_tab = getattr(widget, 'tab_index', None)
+                                if widget_tab == tab_index:
+                                    widget.set_range_filter_conditions(filter_data)
+                                    logger.debug(f"Restored filter UI for tab {tab_index}")
+                                    break
+                    
+                    logger.debug(f"Filter UI restored for tab {tab_index}")
+                except Exception as e:
+                    logger.warning(f"Error restoring filter UI for tab {tab_index}: {e}")
+            
+            logger.info("Filter UI state restoration completed")
+            
+        except Exception as e:
+            logger.error(f"Error in _restore_filter_ui_state: {e}")
     
     def _refresh_graph_display(self, container):
         """Refresh graph display to show all data (remove filters)."""
@@ -2407,28 +2455,43 @@ class TimeGraphWidget(QWidget):
         # This prevents potential issues when the widget is destroyed.
         try:
             # Stop any active processing threads
-            if hasattr(self, 'processing_thread') and self.processing_thread.isRunning():
+            if hasattr(self, 'processing_thread') and self.processing_thread and self.processing_thread.isRunning():
+                logger.debug("Stopping processing thread...")
                 self.processing_thread.quit()
                 if not self.processing_thread.wait(3000):  # Wait up to 3 seconds
                     logger.warning("Processing thread did not finish, terminating...")
                     self.processing_thread.terminate()
                     self.processing_thread.wait(1000)
+                logger.debug("Processing thread stopped")
             
-            # Clean up graph renderer threads
-            if hasattr(self, 'graph_renderer'):
+            # Clean up graph renderer threads - CRITICAL: Thread temizliği
+            if hasattr(self, 'graph_renderer') and self.graph_renderer:
+                logger.debug("Cleaning up graph renderer...")
                 self.graph_renderer.cleanup()
+                logger.debug("Graph renderer cleaned up")
             
-            # Clean up filter manager threads
-            if hasattr(self, 'filter_manager'):
+            # Clean up filter manager threads - CRITICAL: Thread temizliği
+            if hasattr(self, 'filter_manager') and self.filter_manager:
+                logger.debug("Cleaning up filter manager...")
                 self.filter_manager.cleanup()
+                logger.debug("Filter manager cleaned up")
             
             # Clean up plot managers in all containers
             if hasattr(self, 'graph_containers'):
+                logger.debug("Cleaning up plot managers...")
                 for container in self.graph_containers:
                     if hasattr(container, 'plot_manager') and hasattr(container.plot_manager, 'cleanup'):
-                        container.plot_manager.cleanup()
+                        try:
+                            container.plot_manager.cleanup()
+                        except Exception as e:
+                            logger.warning(f"Error cleaning up plot manager: {e}")
+                logger.debug("Plot managers cleaned up")
             
-            logger.info("Cleanup complete")
+            # Wait a bit for all threads to finish
+            import time
+            time.sleep(0.1)
+            
+            logger.info("TimeGraphWidget cleanup complete")
         except Exception as e:
             logger.error(f"Error during TimeGraphWidget cleanup: {e}")
 

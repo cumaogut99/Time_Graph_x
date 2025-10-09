@@ -978,30 +978,63 @@ class GraphRenderer:
     def clear_all_deviation_lines(self):
         """Clear all deviation lines from all graphs."""
         # Stop any running threads before clearing lines
+        logger.debug("Clearing all deviation lines and stopping threads...")
+        
         for thread_key, thread in list(self.deviation_threads.items()):
-            if thread.isRunning():
-                logger.info(f"Stopping deviation thread: {thread_key}")
-                
-                # Try to stop the worker gracefully first
-                if thread_key in self.deviation_workers:
+            try:
+                if thread and thread.isRunning():
+                    logger.debug(f"Stopping deviation thread: {thread_key}")
+                    
+                    # Try to stop the worker gracefully first
+                    if thread_key in self.deviation_workers:
+                        try:
+                            worker = self.deviation_workers[thread_key]
+                            worker.stop()
+                            logger.debug(f"Stopped worker for thread {thread_key}")
+                        except Exception as e:
+                            logger.debug(f"Could not stop worker gracefully: {e}")
+                    
+                    # Disconnect signals before quitting thread
                     try:
-                        worker = self.deviation_workers[thread_key]
-                        worker.stop()
-                        logger.debug(f"Stopped worker for thread {thread_key}")
+                        if hasattr(thread, 'finished'):
+                            thread.finished.disconnect()
+                        if hasattr(thread, 'started'):
+                            thread.started.disconnect()
                     except Exception as e:
-                        logger.debug(f"Could not stop worker gracefully: {e}")
-                
-                thread.quit()
-                if not thread.wait(3000):  # Wait up to 3 seconds
-                    logger.warning(f"Deviation thread {thread_key} did not finish, terminating...")
-                    thread.terminate()
-                    thread.wait(1000)  # Wait for termination
-                else:
-                    logger.info(f"Deviation thread {thread_key} stopped successfully")
+                        logger.debug(f"Error disconnecting thread signals: {e}")
+                    
+                    thread.quit()
+                    if not thread.wait(3000):  # Wait up to 3 seconds
+                        logger.warning(f"Deviation thread {thread_key} did not finish, terminating...")
+                        thread.terminate()
+                        thread.wait(1000)  # Wait for termination
+                    else:
+                        logger.debug(f"Deviation thread {thread_key} stopped successfully")
+                elif thread:
+                    # Thread exists but not running, still need to clean up
+                    logger.debug(f"Cleaning up non-running thread: {thread_key}")
+            except RuntimeError as e:
+                # Thread object already deleted
+                logger.debug(f"Thread {thread_key} already deleted: {e}")
+            except Exception as e:
+                logger.warning(f"Error stopping thread {thread_key}: {e}")
+        
+        # Clear references
         self.deviation_threads.clear()
         self.deviation_workers.clear()
 
+        # Clear deviation lines
         for graph_index in list(self.deviation_lines.keys()):
-            self._clear_deviation_lines(graph_index)
+            try:
+                self._clear_deviation_lines(graph_index)
+            except Exception as e:
+                logger.warning(f"Error clearing deviation lines for graph {graph_index}: {e}")
         self.deviation_lines.clear()
-        self.clear_all_limit_lines()
+        
+        # Clear limit lines
+        try:
+            self.clear_all_limit_lines()
+        except Exception as e:
+            logger.warning(f"Error clearing limit lines: {e}")
+        
+        logger.debug("All deviation lines and threads cleared")
