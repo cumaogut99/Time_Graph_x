@@ -687,13 +687,17 @@ class TimeGraphWidget(QWidget):
         """Reapply active filters after signal redraw."""
         try:
             active_filters = self.filter_manager.get_active_filters()
-            logger.info(f"[FILTER DEBUG] Reapplying {len(active_filters)} active filters")
-            for tab_index, filter_data in active_filters.items():
+            total_filters = sum(len(graphs) for graphs in active_filters.values())
+            logger.info(f"[FILTER DEBUG] Reapplying {total_filters} active filters across {len(active_filters)} tabs")
+            
+            for tab_index, graph_filters in active_filters.items():
                 if tab_index < len(self.graph_containers):
-                    logger.info(f"[FILTER DEBUG] Reapplying filter for tab {tab_index}: {filter_data}")
-                    self._apply_range_filter(filter_data)
+                    # Reapply each graph's filter independently
+                    for graph_index, filter_data in graph_filters.items():
+                        logger.info(f"[FILTER DEBUG] Reapplying filter for tab {tab_index}, graph {graph_index}: {filter_data}")
+                        self._apply_range_filter(filter_data)
                 else:
-                    logger.warning(f"[FILTER DEBUG] Tab {tab_index} no longer exists, removing filter")
+                    logger.warning(f"[FILTER DEBUG] Tab {tab_index} no longer exists, removing all filters")
                     self.filter_manager.remove_filter(tab_index)
         except Exception as e:
             logger.error(f"[FILTER DEBUG] Error reapplying filters: {e}")

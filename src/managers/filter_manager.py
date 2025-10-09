@@ -180,7 +180,10 @@ class FilterManager:
     """Manages range filter calculations and operations."""
     
     def __init__(self, parent_widget=None):
-        self.active_filters = {}
+        # IMPORTANT: active_filters structure changed!
+        # OLD: {tab_index: filter_data}
+        # NEW: {tab_index: {graph_index: filter_data}}
+        self.active_filters = {}  # Per-tab, per-graph filter storage
         self.filter_applied = False
         self.parent_widget = parent_widget
         self.calculation_thread = None
@@ -497,8 +500,15 @@ class FilterManager:
         logger.info("[FILTER MODE] Concatenated mode deactivated")
     
     def save_filter_state(self, tab_index: int, filter_data: dict):
-        """Save filter state for a specific tab."""
-        self.active_filters[tab_index] = filter_data.copy()
+        """Save filter state for a specific tab and graph."""
+        graph_index = filter_data.get('graph_index', 0)
+        
+        # Initialize tab storage if needed
+        if tab_index not in self.active_filters:
+            self.active_filters[tab_index] = {}
+        
+        # Save filter for specific graph in this tab
+        self.active_filters[tab_index][graph_index] = filter_data.copy()
         self.filter_applied = True
         
         # Track concatenated mode
@@ -507,17 +517,32 @@ class FilterManager:
             self.concatenated_filter_tab = tab_index
             logger.info(f"[FILTER MODE] Concatenated mode activated for tab {tab_index}")
         
-        logger.info(f"[FILTER DEBUG] Saved filter state for tab {tab_index}")
+        logger.info(f"[FILTER DEBUG] Saved filter state for tab {tab_index}, graph {graph_index}")
     
-    def get_filter_state(self, tab_index: int) -> dict:
-        """Get filter state for a specific tab."""
-        return self.active_filters.get(tab_index, {})
+    def get_filter_state(self, tab_index: int, graph_index: int = None) -> dict:
+        """
+        Get filter state for a specific tab and optionally a specific graph.
+        
+        Args:
+            tab_index: Tab index
+            graph_index: Graph index (optional). If None, returns all filters for the tab.
+        
+        Returns:
+            If graph_index is provided: filter_data dict for that specific graph
+            If graph_index is None: {graph_index: filter_data} dict for all graphs in tab
+        """
+        tab_filters = self.active_filters.get(tab_index, {})
+        
+        if graph_index is not None:
+            return tab_filters.get(graph_index, {})
+        else:
+            return tab_filters
     
     def get_active_filters(self) -> dict:
         """Get all active filters."""
         return self.active_filters.copy()
     
-    def can_apply_filter(self, mode: str, tab_index: int = None) -> tuple[bool, str]:
+    def can_apply_filter(self, mode: str, tab_index: int = None, graph_index: int = None) -> tuple[bool, str]:
         """
         Check if a filter can be applied.
         
@@ -532,9 +557,11 @@ class FilterManager:
                     return False, f"Concatenated mode is already active on Tab {self.concatenated_filter_tab + 1}. Please clear that filter first."
                 # Same tab, allow update
                 return True, ""
-            # Check if any other filters are active
+            # Check if any other filters are active (on any graph, any tab)
             if self.active_filters:
-                return False, "Other filters are active. Concatenated mode requires all other filters to be cleared first."
+                total_filters = sum(len(graphs) for graphs in self.active_filters.values())
+                if total_filters > 0:
+                    return False, "Other filters are active. Concatenated mode requires all other filters to be cleared first."
             return True, ""
         
         # If trying to apply segmented mode or other filters
@@ -542,24 +569,55 @@ class FilterManager:
             # Check if concatenated mode is active
             if self.is_concatenated_mode_active:
                 return False, f"Concatenated mode is active on Tab {self.concatenated_filter_tab + 1}. This mode prevents other filters from being applied. Please clear the concatenated filter first."
+            # Segmented filters are independent per graph, so always allow
             return True, ""
     
-    def remove_filter(self, tab_index: int):
-        """Remove filter for a specific tab."""
-        if tab_index in self.active_filters:
-            filter_data = self.active_filters[tab_index]
+    def remove_filter(self, tab_index: int, graph_index: int = None):
+        """
+        Remove filter for a specific tab and optionally a specific graph.
+        
+        Args:
+            tab_index: Tab index
+            graph_index: Graph index (optional). If None, removes all filters for the tab.
+        """
+        if tab_index not in self.active_filters:
+            return
+        
+        # If graph_index specified, remove only that graph's filter
+        if graph_index is not None:
+            if graph_index in self.active_filters[tab_index]:
+                filter_data = self.active_filters[tab_index][graph_index]
+                
+                # If removing concatenated mode, reset state
+                if filter_data.get('mode') == 'concatenated':
+                    self.is_concatenated_mode_active = False
+                    self.concatenated_filter_tab = None
+                    logger.info("[FILTER MODE] Concatenated mode deactivated")
+                
+                del self.active_filters[tab_index][graph_index]
+                logger.info(f"[FILTER DEBUG] Removed filter for tab {tab_index}, graph {graph_index}")
+                
+                # If no more filters for this tab, remove tab entry
+                if not self.active_filters[tab_index]:
+                    del self.active_filters[tab_index]
+        else:
+            # Remove all filters for this tab
+            tab_filters = self.active_filters[tab_index]
             
-            # If removing concatenated mode, reset state
-            if filter_data.get('mode') == 'concatenated':
-                self.is_concatenated_mode_active = False
-                self.concatenated_filter_tab = None
-                logger.info("[FILTER MODE] Concatenated mode deactivated")
+            # Check if any filter is concatenated mode
+            for filter_data in tab_filters.values():
+                if filter_data.get('mode') == 'concatenated':
+                    self.is_concatenated_mode_active = False
+                    self.concatenated_filter_tab = None
+                    logger.info("[FILTER MODE] Concatenated mode deactivated")
+                    break
             
             del self.active_filters[tab_index]
-            logger.info(f"[FILTER DEBUG] Removed filter for tab {tab_index}")
-            
-            # Update filter_applied flag
-            self.filter_applied = len(self.active_filters) > 0
+            logger.info(f"[FILTER DEBUG] Removed all filters for tab {tab_index}")
+        
+        # Update filter_applied flag
+        total_filters = sum(len(graphs) for graphs in self.active_filters.values())
+        self.filter_applied = total_filters > 0
     
     def has_active_filters(self) -> bool:
         """Check if there are any active filters."""
