@@ -5,7 +5,7 @@ Filter Manager - Range filter logic and calculations
 import logging
 import numpy as np
 from typing import List, Dict, Any, Tuple, Optional
-from PyQt5.QtCore import QObject, pyqtSignal as Signal, QThread
+from PyQt5.QtCore import QObject, pyqtSignal as Signal, QThread, QTimer
 
 logger = logging.getLogger(__name__)
 
@@ -174,9 +174,31 @@ class FilterManager:
         self.calculation_worker = None
         self._cleanup_in_progress = False
         self._pending_callback = None
+        
+        # Debouncing mechanism to prevent rapid successive calls
+        self._last_calculation_time = 0
+        self._calculation_debounce_ms = 500  # 500ms debounce
+        self._pending_calculation = False
     
     def calculate_filter_segments_threaded(self, all_signals: dict, conditions: list, callback=None):
         """Calculate time segments that satisfy all filter conditions in background thread."""
+        import time
+        
+        current_time = time.time() * 1000  # Convert to milliseconds
+        
+        # Check if this is a rapid successive call
+        if current_time - self._last_calculation_time < self._calculation_debounce_ms:
+            logger.debug(f"[FILTER DEBUG] Debouncing filter calculation (last: {current_time - self._last_calculation_time:.0f}ms ago)")
+            self._pending_calculation = True
+            # Store the latest parameters for delayed execution
+            self._pending_all_signals = all_signals
+            self._pending_conditions = conditions
+            self._pending_callback = callback
+            return
+        
+        # Update last calculation time
+        self._last_calculation_time = current_time
+        
         logger.info(f"[FILTER DEBUG] Starting threaded calculation for {len(conditions)} conditions")
         
         if not conditions or not all_signals:
@@ -230,6 +252,29 @@ class FilterManager:
         # Start the thread
         self.calculation_thread.start()
         logger.info("[FILTER DEBUG] Started filter calculation thread")
+        
+        # Check for pending calculations after a delay
+        if hasattr(self, '_pending_calculation') and self._pending_calculation:
+            QTimer.singleShot(self._calculation_debounce_ms + 100, self._process_pending_calculation)
+    
+    def _process_pending_calculation(self):
+        """Process any pending calculation after debounce period."""
+        if self._pending_calculation and hasattr(self, '_pending_all_signals'):
+            logger.debug("[FILTER DEBUG] Processing pending calculation")
+            self._pending_calculation = False
+            
+            # Execute the pending calculation
+            self.calculate_filter_segments_threaded(
+                self._pending_all_signals,
+                self._pending_conditions,
+                self._pending_callback
+            )
+            
+            # Clear pending data
+            if hasattr(self, '_pending_all_signals'):
+                delattr(self, '_pending_all_signals')
+            if hasattr(self, '_pending_conditions'):
+                delattr(self, '_pending_conditions')
     
     def _safe_callback_execution(self, callback, segments):
         """Safely execute callback with error handling."""

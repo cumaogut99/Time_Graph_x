@@ -647,7 +647,14 @@ class TimeGraphWidget(QWidget):
         if self.filter_manager.has_active_filters():
             logger.info(f"[FILTER DEBUG] Reapplying filters after redraw")
             # Use a timer to ensure plots are fully ready before reapplying filters
-            QTimer.singleShot(100, self._reapply_active_filters)
+            # Debounce filter reapplication to prevent multiple rapid calls
+            if hasattr(self, '_filter_reapply_timer'):
+                self._filter_reapply_timer.stop()
+            
+            self._filter_reapply_timer = QTimer()
+            self._filter_reapply_timer.setSingleShot(True)
+            self._filter_reapply_timer.timeout.connect(self._reapply_active_filters)
+            self._filter_reapply_timer.start(200)  # 200ms debounce
         
         logger.debug("Redrew all signals across all tabs.")
     
