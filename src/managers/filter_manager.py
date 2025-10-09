@@ -231,7 +231,11 @@ class FilterManager:
         self._pending_callback = callback
         
         # Connect signals with proper order and error handling
-        self.calculation_thread.started.connect(self.calculation_worker.run)
+        def debug_started():
+            logger.debug("[THREAD DEBUG] Thread started signal received, calling worker.run()")
+            self.calculation_worker.run()
+        
+        self.calculation_thread.started.connect(debug_started)
         
         # Use a safe callback wrapper
         if callback:
@@ -263,8 +267,10 @@ class FilterManager:
         self.calculation_thread.finished.connect(self._reset_thread_references)
         
         # Start the thread
+        logger.debug(f"[THREAD DEBUG] About to start thread, worker: {self.calculation_worker}, thread: {self.calculation_thread}")
         self.calculation_thread.start()
         logger.info("[FILTER DEBUG] Started filter calculation thread")
+        logger.debug(f"[THREAD DEBUG] Thread started, isRunning: {self.calculation_thread.isRunning()}")
         
         # Check for pending calculations after a delay
         if hasattr(self, '_pending_calculation') and self._pending_calculation:
