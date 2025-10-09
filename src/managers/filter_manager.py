@@ -186,123 +186,98 @@ class FilterManager:
         self.active_filters = {}  # Per-tab, per-graph filter storage
         self.filter_applied = False
         self.parent_widget = parent_widget
-        self.calculation_thread = None
-        self.calculation_worker = None
+        
+        # Multiple threads support - one thread per calculation
+        self.calculation_threads = {}  # {identifier: thread}
+        self.calculation_workers = {}  # {identifier: worker}
         self._cleanup_in_progress = False
-        self._pending_callback = None
         
         # Debouncing mechanism to prevent rapid successive calls
-        self._last_calculation_time = 0
-        self._calculation_debounce_ms = 500  # 500ms debounce
-        self._pending_calculation = False
+        self._last_calculation_time = {}  # Per-graph debouncing
+        self._calculation_debounce_ms = 300  # 300ms debounce (reduced)
         
         # Concatenated mode tracking - global state
         self.is_concatenated_mode_active = False
         self.concatenated_filter_tab = None  # Which tab has concatenated filter
     
-    def calculate_filter_segments_threaded(self, all_signals: dict, conditions: list, callback=None):
+    def calculate_filter_segments_threaded(self, all_signals: dict, conditions: list, callback=None, tab_index: int = 0, graph_index: int = 0):
         """Calculate time segments that satisfy all filter conditions in background thread."""
         import time
         
+        # Create unique identifier for this calculation
+        calc_id = f"tab{tab_index}_graph{graph_index}"
+        
         current_time = time.time() * 1000  # Convert to milliseconds
         
-        # Check if this is a rapid successive call
-        if current_time - self._last_calculation_time < self._calculation_debounce_ms:
-            logger.debug(f"[FILTER DEBUG] Debouncing filter calculation (last: {current_time - self._last_calculation_time:.0f}ms ago)")
-            self._pending_calculation = True
-            # Store the latest parameters for delayed execution
-            self._pending_all_signals = all_signals
-            self._pending_conditions = conditions
-            self._pending_callback = callback
+        # Check if this is a rapid successive call for this specific graph
+        last_time = self._last_calculation_time.get(calc_id, 0)
+        if current_time - last_time < self._calculation_debounce_ms:
+            logger.debug(f"[FILTER DEBUG] Debouncing filter calculation for {calc_id} (last: {current_time - last_time:.0f}ms ago)")
             return
         
-        # Update last calculation time
-        self._last_calculation_time = current_time
+        # Update last calculation time for this graph
+        self._last_calculation_time[calc_id] = current_time
         
-        logger.info(f"[FILTER DEBUG] Starting threaded calculation for {len(conditions)} conditions")
+        logger.info(f"[FILTER DEBUG] Starting threaded calculation for {calc_id} with {len(conditions)} conditions")
         
         if not conditions or not all_signals:
             if callback:
                 callback([])
             return
         
-        # Stop any existing calculation
-        self._stop_calculation()
+        # Stop any existing calculation for this specific graph
+        self._stop_calculation(calc_id)
         
-        # Create new thread and worker with proper parent
-        self.calculation_thread = QThread()
-        self.calculation_worker = FilterCalculationWorker(all_signals, conditions)
-        self.calculation_worker.moveToThread(self.calculation_thread)
+        # Create new thread and worker for this specific calculation
+        calculation_thread = QThread()
+        calculation_worker = FilterCalculationWorker(all_signals, conditions)
+        calculation_worker.moveToThread(calculation_thread)
         
-        # Store callback reference
-        self._pending_callback = callback
+        # Store thread and worker with unique identifier
+        self.calculation_threads[calc_id] = calculation_thread
+        self.calculation_workers[calc_id] = calculation_worker
         
         # Connect signals with proper order and error handling
         def debug_started():
-            logger.debug("[THREAD DEBUG] Thread started signal received, calling worker.run()")
-            self.calculation_worker.run()
+            logger.debug(f"[THREAD DEBUG] Thread started for {calc_id}, calling worker.run()")
+            calculation_worker.run()
         
-        self.calculation_thread.started.connect(debug_started)
+        calculation_thread.started.connect(debug_started)
         
         # Use a safe callback wrapper
         if callback:
-            self.calculation_worker.finished.connect(
-                lambda segments: self._safe_callback_execution(callback, segments)
+            calculation_worker.finished.connect(
+                lambda segments: self._safe_callback_execution(callback, segments, calc_id)
             )
         
-        self.calculation_worker.error.connect(self._on_calculation_error)
+        calculation_worker.error.connect(lambda error: self._on_calculation_error(error, calc_id))
         
         # Cleanup connections - Critical: Must disconnect before deleteLater
         def safe_cleanup():
             try:
                 # Disconnect all signals before deletion
-                if self.calculation_worker:
-                    self.calculation_worker.finished.disconnect()
-                    self.calculation_worker.error.disconnect()
-                    self.calculation_worker.progress.disconnect()
-                if self.calculation_thread:
-                    self.calculation_thread.started.disconnect()
+                calculation_worker.finished.disconnect()
+                calculation_worker.error.disconnect()
+                calculation_worker.progress.disconnect()
+                calculation_thread.started.disconnect()
             except (RuntimeError, TypeError) as e:
-                logger.debug(f"Signal already disconnected: {e}")
+                logger.debug(f"Signal already disconnected for {calc_id}: {e}")
         
-        self.calculation_worker.finished.connect(safe_cleanup)
-        self.calculation_worker.finished.connect(self.calculation_thread.quit)
-        self.calculation_worker.finished.connect(self.calculation_worker.deleteLater)
-        self.calculation_thread.finished.connect(self.calculation_thread.deleteLater)
+        calculation_worker.finished.connect(safe_cleanup)
+        calculation_worker.finished.connect(calculation_thread.quit)
+        calculation_worker.finished.connect(calculation_worker.deleteLater)
+        calculation_thread.finished.connect(calculation_thread.deleteLater)
         
         # Reset references after cleanup
-        self.calculation_thread.finished.connect(self._reset_thread_references)
+        calculation_thread.finished.connect(lambda: self._reset_thread_references(calc_id))
         
         # Start the thread
-        logger.debug(f"[THREAD DEBUG] About to start thread, worker: {self.calculation_worker}, thread: {self.calculation_thread}")
-        self.calculation_thread.start()
-        logger.info("[FILTER DEBUG] Started filter calculation thread")
-        logger.debug(f"[THREAD DEBUG] Thread started, isRunning: {self.calculation_thread.isRunning()}")
-        
-        # Check for pending calculations after a delay
-        if hasattr(self, '_pending_calculation') and self._pending_calculation:
-            QTimer.singleShot(self._calculation_debounce_ms + 100, self._process_pending_calculation)
+        logger.debug(f"[THREAD DEBUG] About to start thread for {calc_id}")
+        calculation_thread.start()
+        logger.info(f"[FILTER DEBUG] Started filter calculation thread for {calc_id}")
+        logger.debug(f"[THREAD DEBUG] Thread started for {calc_id}, isRunning: {calculation_thread.isRunning()}")
     
-    def _process_pending_calculation(self):
-        """Process any pending calculation after debounce period."""
-        if self._pending_calculation and hasattr(self, '_pending_all_signals'):
-            logger.debug("[FILTER DEBUG] Processing pending calculation")
-            self._pending_calculation = False
-            
-            # Execute the pending calculation
-            self.calculate_filter_segments_threaded(
-                self._pending_all_signals,
-                self._pending_conditions,
-                self._pending_callback
-            )
-            
-            # Clear pending data
-            if hasattr(self, '_pending_all_signals'):
-                delattr(self, '_pending_all_signals')
-            if hasattr(self, '_pending_conditions'):
-                delattr(self, '_pending_conditions')
-    
-    def _safe_callback_execution(self, callback, segments):
+    def _safe_callback_execution(self, callback, segments, calc_id):
         """Safely execute callback with error handling."""
         try:
             logger.debug(f"[WORKER DEBUG] _safe_callback_execution called with {len(segments)} segments")
@@ -317,69 +292,74 @@ class FilterManager:
         except Exception as e:
             logger.error(f"[WORKER DEBUG] Error in filter callback: {e}")
     
-    def _reset_thread_references(self):
+    def _reset_thread_references(self, calc_id):
         """Reset thread references after cleanup."""
         try:
             # Only reset if not currently cleaning up
             if not self._cleanup_in_progress:
-                self.calculation_thread = None
-                self.calculation_worker = None
-                self._pending_callback = None
-                logger.debug("Thread references reset")
+                if calc_id in self.calculation_threads:
+                    del self.calculation_threads[calc_id]
+                if calc_id in self.calculation_workers:
+                    del self.calculation_workers[calc_id]
+                logger.debug(f"Thread references reset for {calc_id}")
         except Exception as e:
-            logger.debug(f"Error resetting thread references: {e}")
+            logger.debug(f"Error resetting thread references for {calc_id}: {e}")
     
-    def _stop_calculation(self):
-        """Stop any running calculation."""
+    def _stop_calculation(self, calc_id):
+        """Stop a specific running calculation."""
         try:
             # First stop the worker
-            if self.calculation_worker:
-                self.calculation_worker.stop()
-                logger.debug("Worker stop signal sent")
+            if calc_id in self.calculation_workers:
+                worker = self.calculation_workers[calc_id]
+                worker.stop()
+                logger.debug(f"Worker stop signal sent for {calc_id}")
                 
             # Then handle the thread
-            if self.calculation_thread:
+            if calc_id in self.calculation_threads:
+                thread = self.calculation_threads[calc_id]
                 try:
                     # Check if thread object is still valid
-                    if self.calculation_thread.isRunning():
-                        logger.info("Stopping running filter calculation thread...")
+                    if thread.isRunning():
+                        logger.info(f"Stopping running filter calculation thread for {calc_id}...")
                         
                         # Disconnect signals first to prevent issues
                         try:
-                            if self.calculation_worker:
-                                self.calculation_worker.finished.disconnect()
-                                self.calculation_worker.error.disconnect()
-                                self.calculation_worker.progress.disconnect()
-                            self.calculation_thread.started.disconnect()
+                            if calc_id in self.calculation_workers:
+                                worker = self.calculation_workers[calc_id]
+                                worker.finished.disconnect()
+                                worker.error.disconnect()
+                                worker.progress.disconnect()
+                            thread.started.disconnect()
                         except (RuntimeError, TypeError):
                             pass  # Signals may already be disconnected
                         
-                        self.calculation_thread.quit()
+                        thread.quit()
                         
                         # Wait for thread to finish with timeout
-                        if not self.calculation_thread.wait(5000):  # Increased timeout
-                            logger.warning("Filter calculation thread did not finish, terminating...")
-                            self.calculation_thread.terminate()
-                            self.calculation_thread.wait(2000)  # Wait for termination
+                        if not thread.wait(3000):
+                            logger.warning(f"Filter calculation thread for {calc_id} did not finish, terminating...")
+                            thread.terminate()
+                            thread.wait(1000)
                         
-                        logger.info("Filter calculation thread stopped")
+                        logger.info(f"Filter calculation thread stopped for {calc_id}")
                     else:
-                        logger.debug("Filter calculation thread was not running")
+                        logger.debug(f"Filter calculation thread for {calc_id} was not running")
                         
                 except RuntimeError as e:
-                    # Thread nesnesi zaten silinmiş, sorun değil
-                    logger.debug(f"Thread already deleted during stop: {e}")
+                    logger.debug(f"Thread already deleted during stop for {calc_id}: {e}")
                     
-            # Clean up worker and thread references
-            self.calculation_worker = None
-            self.calculation_thread = None
+            # Clean up references
+            if calc_id in self.calculation_workers:
+                del self.calculation_workers[calc_id]
+            if calc_id in self.calculation_threads:
+                del self.calculation_threads[calc_id]
             
         except Exception as e:
-            logger.debug(f"Error stopping calculation (may already be stopped): {e}")
+            logger.debug(f"Error stopping calculation for {calc_id}: {e}")
     
-    def _on_calculation_error(self, error_msg: str):
+    def _on_calculation_error(self, error_msg: str, calc_id: str):
         """Handle calculation error."""
-        logger.error(f"Filter calculation error: {error_msg}")
+        logger.error(f"Filter calculation error for {calc_id}: {error_msg}")
     
     def cleanup(self):
         """Cleanup filter manager resources."""
@@ -387,11 +367,10 @@ class FilterManager:
             logger.debug("FilterManager cleanup started")
             self._cleanup_in_progress = True
             
-            # Stop any running calculation
-            self._stop_calculation()
-            
-            # Reset references
-            self._reset_thread_references()
+            # Stop all running calculations
+            calc_ids = list(self.calculation_threads.keys())
+            for calc_id in calc_ids:
+                self._stop_calculation(calc_id)
             
             logger.debug("FilterManager cleanup completed")
         except Exception as e:

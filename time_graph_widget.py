@@ -1673,8 +1673,14 @@ class TimeGraphWidget(QWidget):
                 except Exception as e:
                     logger.error(f"Error in filter callback: {e}")
             
-            # Start threaded calculation
-            self.filter_manager.calculate_filter_segments_threaded(all_signals, conditions, on_segments_calculated)
+            # Start threaded calculation with tab and graph indices
+            self.filter_manager.calculate_filter_segments_threaded(
+                all_signals, 
+                conditions, 
+                on_segments_calculated,
+                tab_index=active_tab_index,
+                graph_index=graph_index
+            )
             return  # Exit here, continuation happens in callback
             
         except RuntimeError as e:
