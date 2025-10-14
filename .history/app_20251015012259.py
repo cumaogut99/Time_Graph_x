@@ -574,24 +574,7 @@ class TimeGraphApp(QMainWindow):
         """Kullanıcı arayüzünü kurulum."""
         self.setWindowTitle("Time Graph - Veri Analizi ve Görselleştirme")
         self.setMinimumSize(1200, 800)
-        
-        # Pencereyi ekrana sığacak şekilde boyutlandır (High DPI için uyarlanmış)
-        screen = QApplication.primaryScreen()
-        if screen:
-            screen_geometry = screen.availableGeometry()
-            # Ekranın %85'ini kullan (taskbar ve kenar boşluklarına yer bırak)
-            target_width = int(screen_geometry.width() * 0.85)
-            target_height = int(screen_geometry.height() * 0.85)
-            self.resize(target_width, target_height)
-            
-            # Pencereyi ekranın ortasına yerleştir
-            self.move(
-                screen_geometry.left() + (screen_geometry.width() - target_width) // 2,
-                screen_geometry.top() + (screen_geometry.height() - target_height) // 2
-            )
-        else:
-            # Fallback: Ekran bilgisi alınamazsa varsayılan boyut
-            self.resize(1400, 900)
+        self.resize(1600, 1000)
         
         # Widget container manager'ı oluştur - HER DOSYA İÇİN AYRI WİDGET
         self.widget_container_manager = WidgetContainerManager(self, self.loading_manager)
