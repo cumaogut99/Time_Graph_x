@@ -275,7 +275,8 @@ class PlotManager(QObject):
             self._setup_tooltip_for_plot(plot_widget, tooltips_enabled)
             
             self.plot_widgets.append(plot_widget)
-            plot_layout.addWidget(plot_widget)
+            # Add widget with stretch factor 1 to ensure equal heights
+            plot_layout.addWidget(plot_widget, 1)
 
         # 3. Re-create the settings buttons and their layout container
         self.settings_container = QWidget()
@@ -292,6 +293,80 @@ class PlotManager(QObject):
     def get_subplot_count(self) -> int:
         """Returns the current number of subplots."""
         return self.subplot_count
+    
+    def reorder_graphs(self, from_index: int, to_index: int):
+        """
+        Reorder graphs by swapping positions.
+        
+        Args:
+            from_index: Current index of the graph to move
+            to_index: Target index where the graph should be moved
+        """
+        if not (0 <= from_index < self.subplot_count and 0 <= to_index < self.subplot_count):
+            logger.warning(f"Invalid indices for reordering: from={from_index}, to={to_index}, count={self.subplot_count}")
+            return
+        
+        if from_index == to_index:
+            return
+        
+        logger.info(f"Reordering graphs: {from_index} -> {to_index}")
+        
+        # Get the layout from plot_container
+        plot_layout = self.plot_container.layout()
+        if not plot_layout:
+            logger.error("Plot container has no layout")
+            return
+        
+        # Swap widgets in the list
+        self.plot_widgets[from_index], self.plot_widgets[to_index] = \
+            self.plot_widgets[to_index], self.plot_widgets[from_index]
+        
+        # Remove widgets from layout
+        widget_from = plot_layout.itemAt(from_index).widget()
+        widget_to = plot_layout.itemAt(to_index).widget()
+        
+        plot_layout.removeWidget(widget_from)
+        plot_layout.removeWidget(widget_to)
+        
+        # Re-insert widgets in swapped positions with equal stretch factor (1)
+        # This ensures all graphs maintain equal heights
+        if from_index < to_index:
+            plot_layout.insertWidget(from_index, widget_to, 1)
+            plot_layout.insertWidget(to_index, widget_from, 1)
+        else:
+            plot_layout.insertWidget(to_index, widget_from, 1)
+            plot_layout.insertWidget(from_index, widget_to, 1)
+        
+        # Update X-axis linking: only the last plot should show X-axis labels
+        for i, plot_widget in enumerate(self.plot_widgets):
+            if i < len(self.plot_widgets) - 1:
+                plot_widget.getAxis('bottom').setStyle(showValues=False)
+            else:
+                plot_widget.getAxis('bottom').setStyle(showValues=True)
+            
+            # Re-link X-axes
+            if i > 0:
+                plot_widget.setXLink(self.plot_widgets[0])
+        
+        # Update current_signals dictionary keys to reflect new positions
+        # Format: "signal_name_plot_index"
+        signals_to_update = {}
+        for key, plot_item in list(self.current_signals.items()):
+            if key.endswith(f"_{from_index}"):
+                # This signal belongs to the moved graph
+                new_key = key.rsplit('_', 1)[0] + f"_{to_index}"
+                signals_to_update[new_key] = plot_item
+            elif key.endswith(f"_{to_index}"):
+                # This signal belongs to the target graph
+                new_key = key.rsplit('_', 1)[0] + f"_{from_index}"
+                signals_to_update[new_key] = plot_item
+            else:
+                # Keep other signals as is
+                signals_to_update[key] = plot_item
+        
+        self.current_signals = signals_to_update
+        
+        logger.info(f"Graphs reordered successfully: {from_index} <-> {to_index}")
     
     def enable_datetime_axis(self, enable=True):
         """Enable datetime formatting for all plot x-axes."""

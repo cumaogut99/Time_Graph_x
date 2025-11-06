@@ -3,10 +3,12 @@
 Toolbar Manager for Time Graph Widget
 
 Manages the toolbar interface including:
-- Cursor mode controls
 - Panel toggles
 - Graph and Tab count controls
 - Normalization controls
+- File operations
+
+Note: Cursor mode is permanently set to 'dual' (no UI control)
 """
 
 import logging
@@ -27,11 +29,12 @@ class ToolbarManager(QObject):
     """Manages the toolbar and its controls for the Time Graph Widget."""
     
     # Signals
-    cursor_mode_changed = Signal(str)
+    # NOTE: cursor_mode_changed signal removed - cursor mode is now permanently set to 'dual'
     panel_toggled = Signal()
     settings_toggled = Signal()
     graph_settings_toggled = Signal()
     statistics_settings_toggled = Signal()
+    parameters_toggled = Signal()  # New parameters panel toggle
     correlations_toggled = Signal()
     bitmask_toggled = Signal()
     graph_count_changed = Signal(int)
@@ -400,17 +403,20 @@ class ToolbarManager(QObject):
         self.graph_settings_btn.clicked.connect(self.graph_settings_toggled.emit)
         self.toolbar.addWidget(self.graph_settings_btn)
 
-    def _create_cursor_controls(self):
-        """Create a combo box for cursor mode selection."""
-        cursor_label = QLabel("🎯 Cursor Mode:")
-        cursor_label.setObjectName("groupLabel")
-        self.toolbar.addWidget(cursor_label)
+        # Add Parameters button
+        self.parameters_btn = QToolButton()
+        self.parameters_btn.setObjectName("textButton")
+        self.parameters_btn.setText("🔧 Parameters")
+        self.parameters_btn.setCheckable(True)
+        self.parameters_btn.setChecked(False)
+        self.parameters_btn.setToolTip("Toggle parameters panel")
+        self.parameters_btn.clicked.connect(self.parameters_toggled.emit)
+        self.toolbar.addWidget(self.parameters_btn)
 
-        self.cursor_combo = QComboBox()
-        self.cursor_combo.addItems(["❌ None", "⚡ Dual Cursors"])
-        self.cursor_combo.setCurrentText("⚡ Dual Cursors")
-        self.cursor_combo.setToolTip("Select cursor mode for precise data analysis and measurements")
-        self.toolbar.addWidget(self.cursor_combo)
+    def _create_cursor_controls(self):
+        """Cursor mode is now permanently set to 'dual' - no UI control needed."""
+        # Cursor mode removed from toolbar - always uses dual cursor mode
+        pass
 
 
     def _add_control_group(self, label: str):
@@ -458,24 +464,10 @@ class ToolbarManager(QObject):
 
     def _setup_connections(self):
         """Connect signals and slots for toolbar widgets."""
-        # Connect cursor mode combo box
-        self.cursor_combo.currentTextChanged.connect(self._on_cursor_mode_changed)
+        # Cursor mode combo box removed - always dual mode
         
         # Connect graph controls
         self.graph_count_spinbox.valueChanged.connect(self.graph_count_changed.emit)
-
-    def _on_cursor_mode_changed(self, mode_text: str):
-        """Handle cursor mode changes from the combo box."""
-        # Parse the mode text to extract the actual mode
-        if "none" in mode_text.lower():
-            mode = "none"
-        elif "dual" in mode_text.lower():
-            mode = "dual"
-        else:
-            mode = "none"  # fallback
-            
-        logger.debug(f"Cursor mode changed from '{mode_text}' to '{mode}'")
-        self.cursor_mode_changed.emit(mode)
         
     def get_toolbar(self) -> QToolBar:
         """Get the configured toolbar."""

@@ -13,7 +13,7 @@ from PyQt5.QtWidgets import (
     QColorDialog, QSizePolicy, QStackedWidget, QButtonGroup, QMessageBox
 )
 from src.ui.parameter_filters_panel import ParameterFiltersPanel
-from src.ui.parameters_panel import ParametersPanel
+# NOTE: ParametersPanel removed - now in separate Parameters panel (toolbar)
 from src.ui.static_limits_panel import StaticLimitsPanel
 from src.ui.deviation_panel import DeviationPanel
 from src.ui.basic_deviation_panel import BasicDeviationPanel
@@ -191,21 +191,21 @@ class GraphAdvancedSettingsDialog(QDialog):
         # Navigation buttons
         self.nav_buttons = QButtonGroup(self)
         
-        self.parameters_btn = ModernSidebarButton("Parameters", "📊")
+        # NOTE: Parameters button removed - now in separate Parameters panel
         self.filters_btn = ModernSidebarButton("Range Filters", "🔍")
         self.limits_btn = ModernSidebarButton("Static Limits", "⚠️")
         self.basic_deviation_btn = ModernSidebarButton("Basic Deviation", "📊")
         self.advanced_deviation_btn = ModernSidebarButton("Advanced Deviation", "📈")
         self.advanced_filters_btn = ModernSidebarButton("Advanced Filters", "🔧")
         
-        buttons = [self.parameters_btn, self.filters_btn, self.limits_btn, self.basic_deviation_btn, self.advanced_deviation_btn, self.advanced_filters_btn]
+        buttons = [self.filters_btn, self.limits_btn, self.basic_deviation_btn, self.advanced_deviation_btn, self.advanced_filters_btn]
         
         for i, btn in enumerate(buttons):
             self.nav_buttons.addButton(btn, i)
             layout.addWidget(btn)
             
-        # Set default selection
-        self.parameters_btn.setChecked(True)
+        # Set default selection to Range Filters (first button now)
+        self.filters_btn.setChecked(True)
         
         layout.addStretch()
         parent.addWidget(sidebar)
@@ -219,9 +219,8 @@ class GraphAdvancedSettingsDialog(QDialog):
         # Stacked widget for different panels
         self.stacked_widget = QStackedWidget()
         
+        # NOTE: ParametersPanel removed - now in separate Parameters panel (toolbar)
         # PERFORMANCE: Deferred creation - panelleri sakla ama widget'ları QTimer ile oluştur
-        self.parameters_panel = ParametersPanel(self.all_signals, self.visible_signals, self)
-        self.stacked_widget.addWidget(self.parameters_panel)
         
         # Diğer paneller için placeholder ekle
         self._placeholder_filters = QWidget()
@@ -249,8 +248,8 @@ class GraphAdvancedSettingsDialog(QDialog):
         
         content_layout.addWidget(self.stacked_widget)
         
-        # Set default selection
-        self.parameters_btn.setChecked(True)
+        # Set default selection to first button (Range Filters)
+        self.filters_btn.setChecked(True)
         self.stacked_widget.setCurrentIndex(0)
         
         parent.addWidget(content_widget)
@@ -381,7 +380,8 @@ class GraphAdvancedSettingsDialog(QDialog):
         group.setStyleSheet(self._get_summary_group_style())
         layout = QVBoxLayout(group)
         
-        selected_signals = self.parameters_panel.get_selected_signals()
+        # NOTE: Parameters panel removed - signals now managed in separate Parameters panel
+        selected_signals = []
         
         if selected_signals:
             for signal in selected_signals:
@@ -630,8 +630,7 @@ class GraphAdvancedSettingsDialog(QDialog):
         self.ok_btn.clicked.connect(self.accept)
         self.cancel_btn.clicked.connect(self.reject)
         
-        # Connect panel change signals to update summary
-        self.parameters_panel.signals_changed.connect(self._on_parameters_changed)
+        # NOTE: Parameters panel signal removed - now in separate Parameters panel
         
         # Connect other panel signals if they exist - REAL-TIME güncelleme için
         if hasattr(self.static_limits_panel, 'limits_changed'):
@@ -812,7 +811,9 @@ class GraphAdvancedSettingsDialog(QDialog):
         
     def get_selected_signals(self):
         """Get list of selected signals from parameters panel."""
-        return self.parameters_panel.get_selected_signals()
+        # NOTE: Parameters panel removed - return the visible signals that were passed in
+        # This preserves the current signal selection when dialog is opened/closed
+        return self.visible_signals.copy() if self.visible_signals else []
         
     def get_range_filter_conditions(self) -> Dict[str, Any]:
         """Get the current range filter conditions from the panel."""

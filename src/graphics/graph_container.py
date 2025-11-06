@@ -25,13 +25,22 @@ class GraphContainer(QWidget):
     """
     Manages a collection of vertically stacked plots within a single tab.
     Each GraphContainer has its own PlotManager.
+    Accepts drag-and-drop of parameters/columns to plot them.
     """
+    
+    # Signals
+    from PyQt5.QtCore import pyqtSignal as Signal
+    column_dropped = Signal(int, str)  # graph_index, column_name
     
     def __init__(self, theme_manager: ThemeManager, main_widget, tab_index: int = 0, parent=None):
         super().__init__(parent)
         self.theme_manager = theme_manager
         self.main_widget = main_widget  # Store a reliable reference to TimeGraphWidget
         self.tab_index = tab_index  # Store tab index for signal mapping
+        
+        # Enable drop events
+        self.setAcceptDrops(True)
+        self.drag_over_graph_index = -1  # Track which graph is being hovered
         self.cursor_manager = None  # Initialize cursor manager attribute
         
         # Get signal_processor from main_widget
@@ -106,6 +115,66 @@ class GraphContainer(QWidget):
             
         except Exception as e:
             logger.error(f"Error during GraphContainer cleanup: {e}")
+    
+    # ========== Drag and Drop Events ==========
+    
+    def dragEnterEvent(self, event):
+        """Handle drag enter - accept parameter/column drops."""
+        from PyQt5.QtCore import Qt
+        if event.mimeData().hasFormat("application/x-parameter") or event.mimeData().hasText():
+            event.acceptProposedAction()
+            logger.debug("Drag entered GraphContainer")
+        else:
+            event.ignore()
+    
+    def dragMoveEvent(self, event):
+        """Handle drag move - determine which graph is being hovered."""
+        from PyQt5.QtCore import Qt
+        if event.mimeData().hasFormat("application/x-parameter") or event.mimeData().hasText():
+            event.acceptProposedAction()
+            
+            # Determine which graph is under the cursor
+            pos = event.pos()
+            plot_widgets = self.plot_manager.get_plot_widgets()
+            
+            self.drag_over_graph_index = -1
+            for i, plot_widget in enumerate(plot_widgets):
+                if plot_widget.geometry().contains(pos):
+                    self.drag_over_graph_index = i
+                    break
+        else:
+            event.ignore()
+    
+    def dragLeaveEvent(self, event):
+        """Handle drag leave."""
+        self.drag_over_graph_index = -1
+        logger.debug("Drag left GraphContainer")
+    
+    def dropEvent(self, event):
+        """Handle drop - plot the column on the appropriate graph."""
+        from PyQt5.QtCore import Qt
+        
+        # Extract column name
+        column_name = None
+        if event.mimeData().hasFormat("application/x-parameter"):
+            column_name = bytes(event.mimeData().data("application/x-parameter")).decode('utf-8')
+        elif event.mimeData().hasText():
+            column_name = event.mimeData().text()
+        
+        if column_name and self.drag_over_graph_index >= 0:
+            logger.info(f"Column '{column_name}' dropped on graph {self.drag_over_graph_index}")
+            event.acceptProposedAction()
+            
+            # Emit signal so main widget can handle plotting
+            self.column_dropped.emit(self.drag_over_graph_index, column_name)
+        else:
+            if not column_name:
+                logger.warning("Drop event: no column name found")
+            if self.drag_over_graph_index < 0:
+                logger.warning("Drop event: no graph index determined")
+            event.ignore()
+        
+        self.drag_over_graph_index = -1
 
     # ... other methods to delegate calls to plot_manager can be added here ...
     # (e.g., clear_signals, reset_view, etc.)

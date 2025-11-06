@@ -100,7 +100,7 @@ class BasicDeviationPanel(QWidget):
         
         # Search box
         search_layout = QHBoxLayout()
-        search_label = QLabel("ð Search:")
+        search_label = QLabel("Search:")
         search_label.setStyleSheet("color: #e6f3ff; font-weight: bold; font-size: 13px;")
         
         self.parameter_search = QLineEdit()
@@ -181,7 +181,7 @@ class BasicDeviationPanel(QWidget):
         layout.addWidget(parameter_group)
         
         # Short-term Fluctuation Group
-        fluctuation_group = QGroupBox("â¡ Short-term Fluctuation Detection")
+        fluctuation_group = QGroupBox("Short-term Fluctuation Detection")
         fluctuation_group.setStyleSheet(self._get_group_style())
         fluctuation_layout = QFormLayout(fluctuation_group)
         

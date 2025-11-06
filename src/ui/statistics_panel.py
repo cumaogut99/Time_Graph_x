@@ -21,8 +21,8 @@ from PyQt5.QtWidgets import (
     QLabel, QScrollArea, QFrame, QColorDialog, QSizePolicy, QSplitter,
     QTableWidget, QTableWidgetItem, QHeaderView, QPushButton
 )
-from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QFont, QPalette, QColor, QMouseEvent
+from PyQt5.QtCore import Qt, pyqtSignal, QMimeData, QPoint
+from PyQt5.QtGui import QFont, QPalette, QColor, QMouseEvent, QDrag, QPainter
 
 logger = logging.getLogger(__name__)
 
@@ -59,24 +59,155 @@ class ClickableColorLabel(QLabel):
         super().mousePressEvent(event)
 
 class ClickableGroupBox(QGroupBox):
-    """QGroupBox that emits a signal when clicked."""
+    """QGroupBox that emits a signal when clicked and supports drag-and-drop for reordering."""
     
     clicked = pyqtSignal(int)  # graph_index
+    drag_started = pyqtSignal(int)  # graph_index
+    drop_requested = pyqtSignal(int, int)  # from_index, to_index
     
     def __init__(self, title: str, graph_index: int, parent=None):
         super().__init__(title, parent)
         self.graph_index = graph_index
         self.setCursor(Qt.PointingHandCursor)
+        self.drag_start_position = None
+        self.has_dragged = False  # Track if drag operation started
+        self.setAcceptDrops(True)
     
     def mousePressEvent(self, event: QMouseEvent):
-        # Only emit the signal if the click is within the title bar area (approx. 30px height)
+        # Only handle if the click is within the title bar area (approx. 30px height)
         if event.button() == Qt.LeftButton and event.pos().y() < 30:
-            self.clicked.emit(self.graph_index)
+            # Store drag start position for drag-and-drop
+            self.drag_start_position = event.pos()
+            self.has_dragged = False  # Reset drag flag
         
-        # We don't call super().mousePressEvent(event) if we handle the click,
-        # but in this case, we want default behaviors for other parts of the groupbox.
-        # Let's let the event propagate.
         super().mousePressEvent(event)
+    
+    def mouseMoveEvent(self, event):
+        """Handle mouse move to start drag operation."""
+        if not (event.buttons() & Qt.LeftButton):
+            return
+        
+        if self.drag_start_position is None:
+            return
+        
+        # Check if mouse has moved enough to start drag (minimum distance)
+        if (event.pos() - self.drag_start_position).manhattanLength() < 10:
+            return
+        
+        # Mark that drag has started - this prevents click signal from being emitted
+        self.has_dragged = True
+        
+        # Start drag operation
+        drag = QDrag(self)
+        mime_data = QMimeData()
+        mime_data.setText(str(self.graph_index))
+        drag.setMimeData(mime_data)
+        
+        # Create a pixmap for the drag icon (optional, can be improved)
+        pixmap = self.grab()
+        drag.setPixmap(pixmap)
+        drag.setHotSpot(event.pos() - self.drag_start_position)
+        
+        # Emit signal that drag started
+        self.drag_started.emit(self.graph_index)
+        
+        # Execute drag
+        drag.exec_(Qt.MoveAction)
+        
+        # Reset drag start position
+        self.drag_start_position = None
+    
+    def mouseReleaseEvent(self, event):
+        """Handle mouse release - emit click signal only if no drag occurred."""
+        if event.button() == Qt.LeftButton:
+            # Only emit clicked signal if:
+            # 1. Click was in title bar area
+            # 2. Drag did not start (mouse didn't move enough)
+            # 3. Drag start position was set (meaning we were tracking a click)
+            if (self.drag_start_position is not None and 
+                not self.has_dragged and 
+                event.pos().y() < 30):
+                self.clicked.emit(self.graph_index)
+        
+        # Reset drag tracking
+        self.drag_start_position = None
+        self.has_dragged = False
+        
+        super().mouseReleaseEvent(event)
+    
+    def dragEnterEvent(self, event):
+        """Accept drag events from other graph sections."""
+        if event.mimeData().hasText():
+            try:
+                dragged_index = int(event.mimeData().text())
+                # Only accept if dragging from a different graph
+                if dragged_index != self.graph_index:
+                    event.acceptProposedAction()
+                    # Visual feedback: highlight border
+                    self.setStyleSheet(self.styleSheet() + """
+                        QGroupBox {
+                            border: 3px solid rgba(74, 144, 226, 0.8);
+                        }
+                    """)
+                else:
+                    event.ignore()
+            except ValueError:
+                event.ignore()
+        else:
+            event.ignore()
+    
+    def dragLeaveEvent(self, event):
+        """Remove visual feedback when drag leaves."""
+        # Reset styling (will be reapplied by parent)
+        super().dragLeaveEvent(event)
+    
+    def dragMoveEvent(self, event):
+        """Handle drag move to show drop target."""
+        if event.mimeData().hasText():
+            try:
+                dragged_index = int(event.mimeData().text())
+                if dragged_index != self.graph_index:
+                    event.acceptProposedAction()
+                else:
+                    event.ignore()
+            except ValueError:
+                event.ignore()
+        else:
+            event.ignore()
+    
+    def dropEvent(self, event):
+        """Handle drop to reorder graphs."""
+        if event.mimeData().hasText():
+            try:
+                dragged_index = int(event.mimeData().text())
+                if dragged_index != self.graph_index:
+                    # Emit signal to request reordering
+                    self.drop_requested.emit(dragged_index, self.graph_index)
+                    event.acceptProposedAction()
+                else:
+                    event.ignore()
+            except ValueError:
+                event.ignore()
+        else:
+            event.ignore()
+
+class SignalRowWidget(QWidget):
+    """Custom widget for signal rows with context menu support."""
+    
+    context_menu_requested = pyqtSignal(object, str, int)  # pos, signal_name, graph_index
+    
+    def __init__(self, signal_name: str, graph_index: int, parent=None):
+        super().__init__(parent)
+        self.signal_name = signal_name
+        self.graph_index = graph_index
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._on_context_menu)
+        logger.info(f"SignalRowWidget created for: {signal_name}, graph: {graph_index}")
+    
+    def _on_context_menu(self, pos):
+        """Handle context menu request."""
+        logger.info(f"SignalRowWidget context menu triggered for: {self.signal_name}, graph: {self.graph_index}")
+        self.context_menu_requested.emit(pos, self.signal_name, self.graph_index)
 
 class StatisticsPanel(QWidget):
     """
@@ -94,6 +225,8 @@ class StatisticsPanel(QWidget):
     # Signal emitted when a graph title is clicked
     graph_settings_requested = pyqtSignal(int)  # graph_index
     signal_color_changed = pyqtSignal(str, str) # Emits signal_name and new_color_hex
+    signal_remove_requested = pyqtSignal(str, int) # Emits signal_name and graph_index
+    graph_reorder_requested = pyqtSignal(int, int)  # from_index, to_index
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -102,7 +235,7 @@ class StatisticsPanel(QWidget):
         self.graph_sections = {}  # graph_index -> QGroupBox
         self.signal_data = {}  # full_signal_name -> {graph_index, signal_name, labels_dict}
         self.visible_stats = {'mean', 'max', 'min', 'rms', 'std', 'duty_cycle'}  # Default visible stats
-        self.cursor_mode = "none"  # Track cursor mode for dynamic headers
+        self.cursor_mode = "dual"  # Cursor mode is permanently 'dual'
         
         # Cursor position tracking
         self.cursor_positions = {}  # Store current cursor positions
@@ -403,30 +536,26 @@ class StatisticsPanel(QWidget):
                 )
 
     def _get_stats_info_for_mode(self):
-        """Get statistics info based on current cursor mode."""
-        if self.cursor_mode == 'dual':
-            return [
-                ('c1', '🎯', 'C1'),
-                ('c2', '🎯', 'C2'),
-                ('min', '📉', 'Min'),
-                ('mean', '📊', 'Mean'),
-                ('max', '📈', 'Max'),
-                ('rms', '⚡', 'RMS'),
-                ('std', '📏', 'Std'),
-                ('duty_cycle', '⏱️', 'Duty %')
-            ]
-        else:
-            # When no cursors, maintain a logical order
-            return [
-                ('min', '📉', 'Min'),
-                ('mean', '📊', 'Mean'),
-                ('max', '📈', 'Max'),
-                ('std', '📏', 'Std'),
-                ('duty_cycle', '⏱️', 'Duty %')
-            ]
+        """Get statistics info for dual cursor mode (permanently)."""
+        # Cursor mode is always 'dual'
+        return [
+            ('c1', '🔴', 'C1'),  # Red circle for cursor 1
+            ('c2', '🔵', 'C2'),  # Blue circle for cursor 2
+            ('min', '📉', 'Min'),
+            ('mean', '📊', 'Mean'),
+            ('max', '📈', 'Max'),
+            ('rms', '⚡', 'RMS'),
+            ('std', '📏', 'Std'),
+            ('duty_cycle', '⏱️', 'Duty %')
+        ]
 
     def set_cursor_mode(self, mode: str):
         """Update cursor mode and refresh table headers."""
+        # Force mode to 'dual' - other modes not supported
+        if mode != 'dual':
+            logger.warning(f"Cursor mode '{mode}' not supported - using 'dual' instead")
+            mode = 'dual'
+            
         if self.cursor_mode != mode:
             self.cursor_mode = mode
             # Update common header
@@ -435,17 +564,10 @@ class StatisticsPanel(QWidget):
             self._setup_table_headers()
             # Recreate all signal rows to match new structure
             self._recreate_all_signal_rows()
-            
-        # Clear cursor values if mode is none
-        if mode == 'none':
-            self._clear_cursor_values()
         
-        # Show/hide cursor info panel based on mode
+        # Mode is always 'dual', so always show cursor info panel
         if hasattr(self, 'cursor_info_panel'):
-            if mode == 'dual':
-                self.cursor_info_panel.show()
-            else:
-                self.cursor_info_panel.hide()
+            self.cursor_info_panel.show()  # Always show for dual mode
     
     def set_datetime_axis(self, is_datetime: bool):
         """Enable or disable datetime formatting for cursor values."""
@@ -567,7 +689,7 @@ class StatisticsPanel(QWidget):
         self.header_table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
         
         # Setup headers based on current mode and visible stats
-        headers = ['📊 Signal', '🎨']
+        headers = ['📊 Signal']  # Removed color column
         stats_info = self._get_stats_info_for_mode()
         
         for stat_key, icon, display_name in stats_info:
@@ -596,9 +718,8 @@ class StatisticsPanel(QWidget):
         if not has_saved_widths:
             # Use default widths only for first time initialization
             logger.debug("Using default column widths for header table")
-            self.header_table.setColumnWidth(0, 120)  # Signal name
-            self.header_table.setColumnWidth(1, 30)   # Color - further reduced from 40 to 30
-            for i in range(2, len(headers)):
+            self.header_table.setColumnWidth(0, 150)  # Signal name - increased width
+            for i in range(1, len(headers)):
                 self.header_table.setColumnWidth(i, 80)  # Statistics
         else:
             # Restore saved widths
@@ -626,7 +747,7 @@ class StatisticsPanel(QWidget):
             QHeaderView::section {{
                 background-color: rgba({bg_color_base}, 0.15);
                 border: 1px solid rgba({border_color_base}, 0.3);
-                padding: 5px 8px;
+                padding: 3px 8px;
                 font-weight: bold;
                 font-size: 12px;
                 color: {text_color};
@@ -892,7 +1013,7 @@ class StatisticsPanel(QWidget):
                 }}
                 
                 QTableWidget::item {{
-                    padding: 8px;
+                    padding: 1px 8px;
                     border: none;
                     color: {text_color};
                     background-color: transparent;
@@ -916,7 +1037,7 @@ class StatisticsPanel(QWidget):
                 QHeaderView::section {{
                     background-color: rgba({bg_color_base}, 0.2);
                     color: {text_color};
-                    padding: 8px;
+                    padding: 4px 8px;
                     border: 1px solid rgba({border_color_base}, 0.2);
                     font-weight: bold;
                 }}
@@ -930,6 +1051,8 @@ class StatisticsPanel(QWidget):
         # Apply styling to all graph tables
         for table in self.graph_tables.values():
             table.setStyleSheet(table_style)
+            # Set row height for compact display
+            table.verticalHeader().setDefaultSectionSize(24)
 
     def update_theme(self, theme_colors=None):
         """Update the panel styling when theme changes."""
@@ -1081,24 +1204,8 @@ class StatisticsPanel(QWidget):
         name_item.setFlags(name_item.flags() & ~Qt.ItemIsEditable)  # Make read-only
         table.setItem(row_count, 0, name_item)
         
-        # Color indicator button - smaller size for space efficiency
-        color_btn = QPushButton()
-        color_btn.setFixedSize(20, 16)  # Reduced from 30x20 to 20x16
-        color_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {color};
-                border: 1px solid rgba(255, 255, 255, 0.3);
-                border-radius: 3px;
-            }}
-            QPushButton:hover {{
-                border: 2px solid rgba(255, 255, 255, 0.8);
-            }}
-        """)
-        color_btn.clicked.connect(lambda: self._change_signal_color(full_signal_name))
-        table.setCellWidget(row_count, 1, color_btn)
-        
-        # Statistics columns - initialize with empty values
-        col_index = 2
+        # Statistics columns - initialize with empty values (no color column anymore)
+        col_index = 1
         stats_info = self._get_stats_info_for_mode()
         for stat_key, icon, display_name in stats_info:
             is_cursor_stat = stat_key in ['c1', 'c2']
@@ -1109,13 +1216,12 @@ class StatisticsPanel(QWidget):
                 table.setItem(row_count, col_index, stat_item)
                 col_index += 1
         
-        # Store signal data
+        # Store signal data (no color_button anymore)
         self.signal_data[full_signal_name] = {
             'graph_index': graph_index,
             'signal_name': signal_name,
             'color': color,
             'row_index': row_count,
-            'color_button': color_btn,
             'table': table
         }
         
@@ -1127,51 +1233,89 @@ class StatisticsPanel(QWidget):
         # Ensure minimum column widths are maintained
         for col in range(table.columnCount()):
             current_width = table.columnWidth(col)
-            min_width = 50 if col > 1 else (120 if col == 0 else 30)  # Different minimums for different columns
+            min_width = 150 if col == 0 else 80  # Signal name wider, stats standard
             if current_width < min_width:
                 table.setColumnWidth(col, min_width)
 
     def _change_signal_color(self, full_signal_name: str):
-        """Open color dialog to change signal color."""
+        """Open color dialog to change signal color (called from context menu)."""
         if full_signal_name not in self.signal_data:
+            logger.warning(f"Signal '{full_signal_name}' not found in signal_data")
             return
             
         current_color = QColor(self.signal_data[full_signal_name]['color'])
-        new_color = QColorDialog.getColor(current_color, self, f"Select color for {self.signal_data[full_signal_name]['signal_name']}")
+        base_signal_name = self.signal_data[full_signal_name]['signal_name']
         
-        if new_color.isValid():
-            new_color_hex = new_color.name()
-            # Update stored color
-            self.signal_data[full_signal_name]['color'] = new_color_hex
-            # Update button color
-            color_btn = self.signal_data[full_signal_name]['color_button']
-            color_btn.setStyleSheet(f"""
-                QPushButton {{
-                    background-color: {new_color_hex};
-                    border: 1px solid rgba(255, 255, 255, 0.3);
-                    border-radius: 4px;
-                }}
-                QPushButton:hover {{
-                    border: 2px solid rgba(255, 255, 255, 0.8);
-                }}
-            """)
-            # Emit signal for color change - use base signal name without graph suffix
-            base_signal_name = self.signal_data[full_signal_name]['signal_name']
-            self.signal_color_changed.emit(base_signal_name, new_color_hex)
-            logger.debug(f"Emitted color change signal for '{base_signal_name}' to {new_color_hex}")
+        # Create color dialog with custom styling for better readability
+        color_dialog = QColorDialog(current_color, self)
+        color_dialog.setWindowTitle(f"Select color for {base_signal_name}")
+        
+        # Apply custom stylesheet for better text visibility
+        color_dialog.setStyleSheet("""
+            QColorDialog {
+                background-color: #ffffff;
+            }
+            QLabel {
+                color: #000000;
+                background-color: transparent;
+                font-size: 12px;
+            }
+            QPushButton {
+                color: #000000;
+                background-color: #e0e0e0;
+                border: 1px solid #a0a0a0;
+                border-radius: 4px;
+                padding: 5px 15px;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #d0d0d0;
+            }
+            QPushButton:pressed {
+                background-color: #c0c0c0;
+            }
+            QSpinBox, QLineEdit {
+                color: #000000;
+                background-color: #ffffff;
+                border: 1px solid #a0a0a0;
+                border-radius: 3px;
+                padding: 3px;
+                font-size: 11px;
+            }
+            QSpinBox::up-button, QSpinBox::down-button {
+                background-color: #e0e0e0;
+                border: 1px solid #a0a0a0;
+            }
+            QSpinBox::up-button:hover, QSpinBox::down-button:hover {
+                background-color: #d0d0d0;
+            }
+            QDialogButtonBox QPushButton {
+                min-width: 70px;
+            }
+        """)
+        
+        # Show dialog and get result
+        if color_dialog.exec_() == QColorDialog.Accepted:
+            new_color = color_dialog.selectedColor()
+            if new_color.isValid():
+                new_color_hex = new_color.name()
+                # Update stored color
+                self.signal_data[full_signal_name]['color'] = new_color_hex
+                
+                # Emit signal for plot and legend update
+                self.signal_color_changed.emit(base_signal_name, new_color_hex)
+                logger.info(f"Changed color for signal '{base_signal_name}' to {new_color_hex}")
 
     def _create_graph_section(self, graph_index: int):
         """Create a new graph section with its own table and controls."""
-        # Create group box for this graph
-        section_title = f"⚙️ Graph {graph_index + 1}"
+        # Create group box for this graph with new title format
+        section_title = f"📊 G{graph_index + 1} Filters"
         graph_section = ClickableGroupBox(section_title, graph_index)
         
         # Main layout for the section - minimal padding for space efficiency
         section_layout = QVBoxLayout(graph_section)
-        section_layout.setContentsMargins(2, 20, 2, 2)  # Reduced padding: left, top, right, bottom
+        section_layout.setContentsMargins(2, 8, 2, 2)  # Reduced top padding from 20 to 8
         section_layout.setSpacing(2)  # Reduced spacing between elements
-        
-        # Control buttons removed - cleaner interface
         
         # Create table for this graph
         graph_table = QTableWidget()
@@ -1179,6 +1323,7 @@ class StatisticsPanel(QWidget):
         graph_table.setSelectionBehavior(QTableWidget.SelectRows)
         graph_table.setSelectionMode(QTableWidget.SingleSelection)
         graph_table.verticalHeader().setVisible(False)
+        graph_table.verticalHeader().setDefaultSectionSize(24)  # Reduce row height for compact display
         graph_table.horizontalHeader().setStretchLastSection(False)  # Disable auto-stretch for manual resize
         graph_table.setSortingEnabled(False)
         graph_table.setMaximumHeight(200)  # Limit height
@@ -1186,6 +1331,13 @@ class StatisticsPanel(QWidget):
         # Disable horizontal scrollbar and enable column resizing
         graph_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         graph_table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)  # Allow manual column resize
+        
+        # Enable context menu for right-click operations
+        graph_table.setContextMenuPolicy(Qt.CustomContextMenu)
+        graph_table.customContextMenuRequested.connect(
+            lambda pos, gidx=graph_index, table=graph_table: self._on_table_context_menu(pos, gidx, table)
+        )
+        logger.info(f"Context menu ENABLED for Graph {graph_index + 1} table")
         
         # Set up table headers
         self._setup_table_headers_for_graph(graph_table)
@@ -1211,6 +1363,9 @@ class StatisticsPanel(QWidget):
         # Connect click signal
         graph_section.clicked.connect(self.graph_settings_requested.emit)
         
+        # Connect drag-and-drop signals
+        graph_section.drop_requested.connect(self._on_graph_drop_requested)
+        
         logger.debug(f"Created graph section for Graph {graph_index + 1}")
 
     def _sync_new_table_widths(self, table: QTableWidget):
@@ -1222,6 +1377,9 @@ class StatisticsPanel(QWidget):
 
     def _apply_table_styling_to_single_table(self, table: QTableWidget):
         """Apply current theme styling to a single table."""
+        # Set row height for compact display
+        table.verticalHeader().setDefaultSectionSize(24)
+        
         # Get theme colors
         theme_colors = {}
         if hasattr(self.parent(), 'theme_manager'):
@@ -1267,7 +1425,7 @@ class StatisticsPanel(QWidget):
                 }}
                 
                 QTableWidget::item {{
-                    padding: 8px;
+                    padding: 1px 8px;
                     border: none;
                     color: {text_color};
                     background-color: transparent;
@@ -1291,7 +1449,7 @@ class StatisticsPanel(QWidget):
                 QHeaderView::section {{
                     background-color: rgba({bg_color_base}, 0.2);
                     color: {text_color};
-                    padding: 8px;
+                    padding: 4px 8px;
                     border: 1px solid rgba({border_color_base}, 0.2);
                     font-weight: bold;
                 }}
@@ -1305,7 +1463,7 @@ class StatisticsPanel(QWidget):
 
     def _setup_table_headers_for_graph(self, table: QTableWidget):
         """Setup table headers for a specific graph table."""
-        headers = ['Signal', '🎨']
+        headers = ['Signal']  # Removed color column
         
         # Add statistics columns based on visible stats
         stats_info = self._get_stats_info_for_mode()
@@ -1326,9 +1484,8 @@ class StatisticsPanel(QWidget):
                 table.setColumnWidth(i, width)
         else:
             # Fallback to default widths
-            table.setColumnWidth(0, 120)  # Signal name column
-            table.setColumnWidth(1, 30)   # Color column - further reduced from 40 to 30
-            for i in range(2, len(headers)):
+            table.setColumnWidth(0, 150)  # Signal name column - increased width since no color column
+            for i in range(1, len(headers)):
                 table.setColumnWidth(i, 80)  # Statistics columns
         
         # Set minimum column widths to prevent columns from becoming too small
@@ -1344,9 +1501,8 @@ class StatisticsPanel(QWidget):
             pass
         # Connect to sync function
         header.sectionResized.connect(lambda idx, old, new, t=table: self._on_graph_table_resized(t, idx, old, new))
-
     def _apply_graph_section_styling(self, graph_section):
-        """Apply styling to a graph section."""
+        """Apply styling to a graph section with minimal vertical padding."""
         # Get theme colors
         theme_colors = {}
         if hasattr(self.parent(), 'theme_manager'):
@@ -1361,11 +1517,11 @@ class StatisticsPanel(QWidget):
                 'primary': '#4a90e2'
             }
         
-        # Apply styling
+        # Apply styling with minimal padding for the title
         graph_section.setStyleSheet(f"""
             ClickableGroupBox {{
                 font-weight: bold;
-                font-size: 14px;
+                font-size: 13px;
                 border: 2px solid {theme_colors.get('border', '#4a90e2')};
                 border-radius: 8px;
                 margin-top: 0px;
@@ -1379,21 +1535,26 @@ class StatisticsPanel(QWidget):
             }}
             ClickableGroupBox::title {{
                 subcontrol-origin: margin;
-                left: 15px;
-                padding: 5px 10px;
+                left: 10px;
+                padding: 2px 8px;
                 background-color: rgba(0, 0, 0, 0.3);
-                border-radius: 6px;
+                border-radius: 4px;
                 color: {theme_colors.get('primary', '#4a90e2')};
             }}
-            /* Button styles removed - no buttons in sections */
         """)
 
     # Button-related methods removed for cleaner interface
 
-    def _create_signal_row(self, signal_name: str, color: str) -> QWidget:
+    def _create_signal_row(self, signal_name: str, color: str, graph_index: int = 0) -> QWidget:
         """Create a horizontal row for a signal with all its statistics using QSplitter."""
-        row_widget = QWidget()
+        row_widget = SignalRowWidget(signal_name, graph_index)
         row_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        
+        # Connect context menu signal
+        row_widget.context_menu_requested.connect(
+            lambda pos, sname, gidx: self._show_signal_context_menu(pos, sname, gidx, row_widget)
+        )
+        
         row_layout = QVBoxLayout(row_widget)
         row_layout.setContentsMargins(5, 3, 5, 3)
         row_layout.setSpacing(0)
@@ -1425,7 +1586,8 @@ class StatisticsPanel(QWidget):
         name_label.setWordWrap(False)
         # Use theme-appropriate color for signal name
         name_label.setStyleSheet("")  # Will inherit from parent styling
-        name_label.setToolTip(signal_name)  # Show full name in tooltip
+        name_label.setToolTip(f"{signal_name}\n\nRight-click to remove from graph")  # Show full name and hint in tooltip
+        
         name_layout.addWidget(name_label)
         name_layout.addStretch()
         
@@ -1560,7 +1722,7 @@ class StatisticsPanel(QWidget):
         table = signal_info['table']
         
         # Update each statistic with proper formatting
-        col_index = 2  # Start after Signal and Color columns
+        col_index = 1  # Start after Signal column (no color column anymore)
         stats_info = self._get_stats_info_for_mode()
         
         for stat_key, icon, display_name in stats_info:
@@ -1958,3 +2120,121 @@ class StatisticsPanel(QWidget):
             self.container_layout.removeWidget(self._no_data_box)
             self._no_data_box.deleteLater()
             delattr(self, '_no_data_box')
+    
+    def _on_table_context_menu(self, pos, graph_index: int, table):
+        """
+        Handle context menu request on table.
+        
+        Args:
+            pos: Position where menu was requested (relative to table)
+            graph_index: Index of the graph
+            table: The QTableWidget that was right-clicked
+        """
+        # Get the row that was clicked
+        row = table.rowAt(pos.y())
+        if row < 0:
+            logger.debug(f"Context menu requested outside of table rows (graph {graph_index})")
+            return
+        
+        # Get signal name from the first column
+        name_item = table.item(row, 0)
+        if not name_item:
+            logger.warning(f"No signal name found at row {row} in graph {graph_index}")
+            return
+        
+        signal_name = name_item.text()
+        logger.info(f"Context menu triggered for signal '{signal_name}' at row {row}, graph {graph_index}")
+        
+        # Show the context menu
+        self._show_signal_context_menu(pos, signal_name, graph_index, table)
+    
+    def _show_signal_context_menu(self, pos, signal_name: str, graph_index: int, widget):
+        """
+        Show context menu for signal with various options.
+        
+        Args:
+            pos: Position where menu was requested
+            signal_name: Name of the signal
+            graph_index: Index of the graph containing this signal
+            widget: The widget that was right-clicked
+        """
+        logger.info(f"Showing context menu for signal: {signal_name}, graph: {graph_index}")
+        
+        from PyQt5.QtWidgets import QMenu
+        from PyQt5.QtGui import QCursor
+        
+        # Create context menu
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #2d4a66;
+                color: #e6f3ff;
+                border: 1px solid rgba(74, 144, 226, 0.5);
+                border-radius: 4px;
+                padding: 4px;
+            }
+            QMenu::item {
+                padding: 6px 20px;
+                border-radius: 3px;
+            }
+            QMenu::item:selected {
+                background-color: rgba(74, 144, 226, 0.3);
+            }
+            QMenu::separator {
+                height: 1px;
+                background-color: rgba(74, 144, 226, 0.3);
+                margin: 4px 0px;
+            }
+        """)
+        
+        # === SIGNAL OPERATIONS ===
+        # Add "Change Color" action
+        change_color_action = menu.addAction("🎨 Change Color")
+        change_color_action.setToolTip(f"Change color for '{signal_name}'")
+        
+        # Add "Remove from graph" action
+        remove_action = menu.addAction("🗑️ Remove from Graph")
+        remove_action.setToolTip(f"Remove '{signal_name}' from graph {graph_index}")
+        
+        # Add separator for future options
+        menu.addSeparator()
+        
+        # === PLACEHOLDER FOR FUTURE FEATURES ===
+        # You can add more actions here later, for example:
+        # export_action = menu.addAction("💾 Export Data")
+        # copy_action = menu.addAction("📋 Copy Statistics")
+        # etc.
+        
+        # Show menu at cursor position (global coordinates)
+        global_pos = widget.mapToGlobal(pos)
+        logger.debug(f"Showing menu at position: {global_pos}")
+        action = menu.exec_(global_pos)
+        
+        # Handle selected action
+        if action == change_color_action:
+            logger.info(f"User selected: Change color for signal '{signal_name}'")
+            # Find full signal name with graph suffix
+            full_signal_name = None
+            for fname, sdata in self.signal_data.items():
+                if sdata['signal_name'] == signal_name and sdata['graph_index'] == graph_index:
+                    full_signal_name = fname
+                    break
+            
+            if full_signal_name:
+                self._change_signal_color(full_signal_name)
+            else:
+                logger.warning(f"Could not find full signal name for '{signal_name}' in graph {graph_index}")
+        
+        elif action == remove_action:
+            logger.info(f"User selected: Remove signal '{signal_name}' from graph {graph_index}")
+            self.signal_remove_requested.emit(signal_name, graph_index)
+        # elif action == export_action:  # Future feature
+        #     self._export_signal_data(signal_name)
+        # elif action == copy_action:  # Future feature
+        #     self._copy_signal_stats(signal_name)
+    
+    def _on_graph_drop_requested(self, from_index: int, to_index: int):
+        """Handle graph drop request to reorder graphs."""
+        logger.info(f"Graph reorder requested: Graph {from_index + 1} -> Graph {to_index + 1}")
+        # Emit signal to parent widget to handle the reordering
+        self.graph_reorder_requested.emit(from_index, to_index)

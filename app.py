@@ -1296,6 +1296,47 @@ class TimeGraphApp(QMainWindow):
             active_file_index = self.file_manager.active_file_index
             file_data = self.file_manager.get_file_data(active_file_index)
             
+            # Add calculated parameters to dataframe
+            if hasattr(active_widget, 'signal_processor'):
+                all_signals = active_widget.signal_processor.get_all_signals()
+                if all_signals:
+                    # Get time column
+                    time_col = file_data.get('time_column', '') if file_data else None
+                    if not time_col and hasattr(active_widget.data_manager, 'time_column'):
+                        time_col = active_widget.data_manager.time_column
+                    
+                    # Get time data from first signal or dataframe
+                    time_data = None
+                    if time_col and time_col in dataframe.columns:
+                        time_data = dataframe.get_column(time_col).to_numpy()
+                    elif all_signals:
+                        # Get time from first signal
+                        first_signal = list(all_signals.values())[0]
+                        if 'x_data' in first_signal:
+                            time_data = first_signal['x_data']
+                    
+                    if time_data is not None:
+                        # Add calculated parameters that are not in original dataframe
+                        calculated_params = {}
+                        original_columns = set(dataframe.columns)
+                        
+                        for signal_name, signal_data in all_signals.items():
+                            if signal_name not in original_columns and signal_name != time_col:
+                                if 'y_data' in signal_data:
+                                    y_data = signal_data['y_data']
+                                    # Ensure same length as time_data
+                                    if len(y_data) == len(time_data):
+                                        calculated_params[signal_name] = y_data
+                        
+                        # Add calculated parameters to dataframe
+                        if calculated_params:
+                            import numpy as np
+                            for param_name, param_data in calculated_params.items():
+                                dataframe = dataframe.with_columns(
+                                    pl.Series(param_name, param_data)
+                                )
+                            logger.info(f"Added {len(calculated_params)} calculated parameters to save: {list(calculated_params.keys())}")
+            
             # Suggest filename based on original file
             suggested_name = "project.mpai"
             if file_data:

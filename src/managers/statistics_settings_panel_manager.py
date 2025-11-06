@@ -31,7 +31,7 @@ class StatisticsSettingsPanelManager(QObject):
         self.parent = parent_widget
         self.settings_panel = None
         self.column_checkboxes = {}
-        self.current_cursor_mode = "none"  # Track cursor mode
+        self.current_cursor_mode = "dual"  # Cursor mode is permanently 'dual'
         
         # Duty cycle threshold settings
         self.duty_cycle_group = None
@@ -252,18 +252,17 @@ class StatisticsSettingsPanelManager(QObject):
     
     def set_cursor_mode(self, mode: str):
         """Update cursor mode and enable/disable RMS checkbox accordingly."""
+        # Force mode to 'dual' - other modes not supported
+        if mode != 'dual':
+            mode = 'dual'
+            
         self.current_cursor_mode = mode
         
-        # Enable/disable RMS checkbox based on cursor mode
+        # RMS checkbox is always enabled for dual mode (permanent setting)
         if 'rms' in self.column_checkboxes:
             rms_checkbox = self.column_checkboxes['rms']
-            if mode == 'dual':
-                rms_checkbox.setEnabled(True)
-                rms_checkbox.setText("RMS (C1)")
-            else:
-                rms_checkbox.setEnabled(False)
-                rms_checkbox.setChecked(False)  # Uncheck when disabled
-                rms_checkbox.setText("RMS (requires cursors)")
+            rms_checkbox.setEnabled(True)
+            rms_checkbox.setText("RMS (C1)")
         
         # Emit updated visible columns
         self._on_visibility_changed()

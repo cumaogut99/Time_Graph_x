@@ -37,6 +37,7 @@ from src.managers.data_manager import TimeSeriesDataManager
 from src.managers.settings_panel_manager import SettingsPanelManager
 from src.managers.statistics_settings_panel_manager import StatisticsSettingsPanelManager
 from src.managers.graph_settings_panel_manager import GraphSettingsPanelManager
+from src.managers.parameters_panel_manager import ParametersPanelManager
 from src.managers.bitmask_panel_manager import BitmaskPanelManager
 from src.ui.graph_settings_dialog import GraphSettingsDialog
 from src.ui.graph_advanced_settings_dialog import GraphAdvancedSettingsDialog
@@ -139,6 +140,7 @@ class TimeGraphWidget(QWidget):
         self.settings_panel_manager = SettingsPanelManager(self)
         self.statistics_settings_panel_manager = StatisticsSettingsPanelManager(self)
         self.graph_settings_panel_manager = GraphSettingsPanelManager(self)
+        self.parameters_panel_manager = ParametersPanelManager(self)
         self.theme_manager = ThemeManager()
         self.bitmask_panel_manager = BitmaskPanelManager(self.data_manager, self.theme_manager, self)
         
@@ -191,10 +193,12 @@ class TimeGraphWidget(QWidget):
         # Create new analysis panels
         self.correlations_panel = self._create_correlations_panel()
         self.bitmask_panel = self._create_bitmask_panel()
+        self.parameters_panel = self.parameters_panel_manager.get_panel()
         
         self.left_panel_stack.addWidget(self.settings_panel)
         self.left_panel_stack.addWidget(self.statistics_settings_panel)
         self.left_panel_stack.addWidget(self.graph_settings_panel)
+        self.left_panel_stack.addWidget(self.parameters_panel)
         self.left_panel_stack.addWidget(self.correlations_panel)
         self.left_panel_stack.addWidget(self.bitmask_panel)
         
@@ -248,6 +252,8 @@ class TimeGraphWidget(QWidget):
         # Connect graph settings signal
         self.statistics_panel.graph_settings_requested.connect(self._on_graph_settings_requested)
         self.statistics_panel.signal_color_changed.connect(self._on_signal_color_changed)
+        self.statistics_panel.signal_remove_requested.connect(self._on_signal_remove_requested)
+        self.statistics_panel.graph_reorder_requested.connect(self._on_graph_reorder_requested)
         
         # Connect theme change signal
         self.theme_manager.theme_changed.connect(lambda: self.statistics_panel.update_theme(self.theme_manager.get_theme_colors()))
@@ -268,22 +274,20 @@ class TimeGraphWidget(QWidget):
         """Delayed setup after UI is fully initialized."""
         logger.debug("Starting delayed initial setup")
         
-        # Initialize cursor manager for the first time
+        # Initialize cursor manager for the first time with dual mode
         self._initialize_cursor_manager()
         
-        # Ensure cursor mode matches toolbar default
-        self._force_cursor_mode_sync()
-
-        # Manually trigger the cursor mode change logic to update all panels on startup
-        initial_mode = "dual"  # Default mode
-        if self.toolbar_manager and hasattr(self.toolbar_manager, 'cursor_combo'):
-            toolbar_text = self.toolbar_manager.cursor_combo.currentText().lower()
-            if "none" in toolbar_text:
-                initial_mode = "none"
+        # Cursor mode is permanently set to 'dual'
+        if self.cursor_manager:
+            self.cursor_manager.set_mode("dual")
         
-        # This call ensures that the statistics panel and other components
-        # are correctly configured with the initial cursor mode.
-        self._on_cursor_mode_changed(initial_mode)
+        # Update statistics panel with dual cursor mode
+        if hasattr(self, 'statistics_panel') and self.statistics_panel:
+            self.statistics_panel.set_cursor_mode("dual")
+            
+        # Update statistics settings panel with dual cursor mode
+        if hasattr(self, 'statistics_settings_panel_manager') and self.statistics_settings_panel_manager:
+            self.statistics_settings_panel_manager.set_cursor_mode("dual")
         
         logger.debug("Delayed initial setup completed")
 
@@ -516,50 +520,23 @@ class TimeGraphWidget(QWidget):
             
             # Viewport lock feature removed - cursors now stay at fixed data coordinates
             
-            # Use stored mode if available, otherwise sync with toolbar
-            if hasattr(self, 'current_cursor_mode') and self.current_cursor_mode:
-                self.cursor_manager.set_mode(self.current_cursor_mode)
-                logger.debug(f"Applied stored cursor mode: {self.current_cursor_mode}")
-            else:
-                # Fallback to toolbar selection
-                toolbar_mode = self.toolbar_manager.cursor_combo.currentText().lower()
-                if "dual" in toolbar_mode:
-                    toolbar_mode = "dual"
-                elif "none" in toolbar_mode:
-                    toolbar_mode = "none"
-                else:
-                    toolbar_mode = "dual"  # Default to dual
-                
-                self.cursor_manager.set_mode(toolbar_mode)
-                self.current_cursor_mode = toolbar_mode
-                logger.debug(f"Applied toolbar cursor mode: {toolbar_mode}")
-            
-            #logger.debug(f"Cursor manager re-initialized for tab {self.tab_widget.currentIndex()} with mode: {toolbar_mode}")
+            # Cursor mode is permanently 'dual'
+            self.cursor_manager.set_mode("dual")
+            self.current_cursor_mode = "dual"
+            logger.debug("Applied cursor mode: dual (permanent setting)")
 
     def _force_cursor_mode_sync(self):
-        """Force cursor mode to match toolbar selection, ensuring consistency."""
+        """Ensure cursor mode is set to dual (permanently)."""
         if not self.cursor_manager:
             return
             
-        # Get current mode from toolbar and parse it properly
-        toolbar_text = self.toolbar_manager.cursor_combo.currentText().lower()
-        if "dual" in toolbar_text:
-            toolbar_mode = "dual"
-        elif "none" in toolbar_text:
-            toolbar_mode = "none"
-        else:
-            toolbar_mode = "dual"  # Default to dual
-        
-        # Only sync if there's a mismatch or if cursor manager doesn't have the right mode
+        # Cursor mode is permanently 'dual' - no toolbar selection needed
         current_manager_mode = getattr(self.cursor_manager, 'current_mode', None)
-        if current_manager_mode != toolbar_mode:
-            # Ensure cursor manager matches toolbar selection
+        if current_manager_mode != "dual":
             if hasattr(self.cursor_manager, 'set_mode'):
-                self.cursor_manager.set_mode(toolbar_mode)
-                self.current_cursor_mode = toolbar_mode
-                logger.debug(f"Synced cursor mode to toolbar selection: {toolbar_mode}")
-        else:
-            logger.debug(f"Cursor mode already in sync: {toolbar_mode}")
+                self.cursor_manager.set_mode("dual")
+                self.current_cursor_mode = "dual"
+                logger.debug("Synced cursor mode to dual (permanent setting)")
 
     def _initialize_signal_mapping(self, signal_names: list[str]):
         """
@@ -726,12 +703,12 @@ class TimeGraphWidget(QWidget):
             # Reinitialize cursor manager to ensure it's working with current plot widgets
             self._initialize_cursor_manager()
             
-            if self.cursor_manager and cursor_mode != "none":
-                # Set the cursor mode
+            if self.cursor_manager:
+                # Set the cursor mode (always 'dual')
                 self.cursor_manager.set_mode(cursor_mode)
                 
                 # If we have saved positions, try to restore them
-                if saved_positions and cursor_mode == "dual":
+                if saved_positions:
                     # Give cursors a moment to be created, then restore positions
                     QTimer.singleShot(100, lambda: self._restore_cursor_positions(saved_positions))
                 
@@ -828,6 +805,12 @@ class TimeGraphWidget(QWidget):
         # DON'T auto-draw signals on startup - let user choose what to plot
         # self._redraw_all_signals()  # Commented out to prevent auto-plotting
         
+        # Update parameters panel with loaded columns
+        if hasattr(self, 'parameters_panel_manager'):
+            time_col = self.data_manager.time_column if hasattr(self.data_manager, 'time_column') else None
+            self.parameters_panel_manager.update_columns(list(all_signals.keys()), time_col)
+            logger.info(f"Parameters panel updated with {len(all_signals)} columns")
+        
         self._initialize_cursor_manager()
         self._recreate_statistics_panel()
 
@@ -844,6 +827,44 @@ class TimeGraphWidget(QWidget):
         QMessageBox.critical(self, "Processing Error", f"Failed to process data:\n\n{error_msg}")
         logger.error(f"Signal processing thread error: {error_msg}")
 
+    def _on_column_dropped_on_graph(self, graph_index: int, column_name: str):
+        """
+        Handle when a column is dropped onto a graph.
+        Plot that column on the specified graph.
+        """
+        logger.info(f"Column '{column_name}' dropped on graph {graph_index}")
+        
+        # Get current tab index
+        tab_index = self.tab_widget.currentIndex()
+        if tab_index < 0:
+            logger.warning("No active tab")
+            return
+        
+        # Check if signal exists in signal processor
+        if column_name not in self.signal_processor.signal_data:
+            logger.warning(f"Column '{column_name}' not found in signal processor")
+            return
+        
+        # Add signal to graph signal mapping
+        if tab_index not in self.graph_signal_mapping:
+            self.graph_signal_mapping[tab_index] = {}
+        
+        if graph_index not in self.graph_signal_mapping[tab_index]:
+            self.graph_signal_mapping[tab_index][graph_index] = []
+        
+        # Add signal if not already mapped to this graph
+        if column_name not in self.graph_signal_mapping[tab_index][graph_index]:
+            self.graph_signal_mapping[tab_index][graph_index].append(column_name)
+            logger.info(f"Added '{column_name}' to graph {graph_index} in tab {tab_index}")
+            
+            # Redraw the graph with the new signal
+            self._redraw_all_signals()
+            
+            # Update statistics panel
+            self._recreate_statistics_panel()
+        else:
+            logger.info(f"Column '{column_name}' already plotted on graph {graph_index}")
+    
     def _on_graph_settings_requested(self, graph_index: int):
         """Open the advanced graph settings dialog for comprehensive configuration."""
         # CRITICAL: Capture the tab index when dialog is opened
@@ -998,49 +1019,8 @@ class TimeGraphWidget(QWidget):
         """Handle theme changes broadcast from the theme manager."""
         self._apply_theme()
     
-    def _on_cursor_mode_changed(self, mode: str):
-        """Handle cursor mode changes."""
-        logger.info(f"Cursor mode change requested: {mode}")
-        
-        # Update stored mode immediately
-        self.current_cursor_mode = mode
-        
-        # Ensure cursor manager is properly initialized before applying mode
-        if not self.cursor_manager:
-            logger.info("Cursor manager not initialized, initializing now...")
-            self._initialize_cursor_manager()
-        
-        # Apply to cursor manager if it exists
-        if self.cursor_manager and hasattr(self.cursor_manager, 'set_mode'):
-            try:
-                self.cursor_manager.set_mode(mode)
-                logger.info(f"Successfully applied cursor mode: {mode}")
-            except Exception as e:
-                logger.error(f"Failed to set cursor mode: {e}")
-                # Try to reinitialize cursor manager
-                self._initialize_cursor_manager()
-                if self.cursor_manager:
-                    self.cursor_manager.set_mode(mode)
-        else:
-            logger.warning("Cursor manager not available for mode change, reinitializing...")
-            self._initialize_cursor_manager()
-            if self.cursor_manager:
-                self.cursor_manager.set_mode(mode)
-            
-        # Update statistics panel with new cursor mode
-        if hasattr(self, 'statistics_panel') and self.statistics_panel:
-            self.statistics_panel.set_cursor_mode(mode)
-            
-        # Update statistics settings panel with new cursor mode
-        if hasattr(self, 'statistics_settings_panel_manager') and self.statistics_settings_panel_manager:
-            self.statistics_settings_panel_manager.set_cursor_mode(mode)
-        
-        # Update zoom button state in graph settings panel
-        if hasattr(self, 'graph_settings_panel_manager'):
-            self.graph_settings_panel_manager.update_zoom_button_state()
-            
-        # Redraw panel for new columns
-        self._recreate_statistics_panel()
+    # NOTE: _on_cursor_mode_changed removed - cursor mode is now permanently 'dual'
+    # Cursor mode is initialized to 'dual' on startup and never changes
     
     def _on_panel_toggled(self):
         """Handle statistics panel visibility toggle."""
@@ -1056,6 +1036,10 @@ class TimeGraphWidget(QWidget):
         """Handle graph settings panel visibility toggle."""
         self._toggle_left_panel(self.graph_settings_panel)
         #logger.info(f"Graph settings panel visibility: {self.left_panel_stack.isVisible() and self.left_panel_stack.currentWidget() == self.graph_settings_panel}")
+
+    def _on_parameters_toggled(self):
+        """Handle parameters panel visibility toggle."""
+        self._toggle_left_panel(self.parameters_panel)
 
     def _on_statistics_settings_toggled(self):
         """Handle statistics settings panel visibility toggle."""
@@ -1262,6 +1246,9 @@ class TimeGraphWidget(QWidget):
         
         # Connect the settings button signal from the new container's plot manager
         graph_container.plot_manager.settings_requested.connect(self._on_graph_settings_requested)
+        
+        # Connect drag-drop signal to plot column on graph
+        graph_container.column_dropped.connect(self._on_column_dropped_on_graph)
         
         self.graph_containers.append(graph_container)
         
@@ -2502,7 +2489,7 @@ Devam etmek istiyor musunuz?
     def _setup_connections(self):
         """Setup signal-slot connections for the widget."""
         # Toolbar connections
-        self.toolbar_manager.cursor_mode_changed.connect(self._on_cursor_mode_changed)
+        # NOTE: cursor_mode_changed connection removed - cursor mode is now permanently 'dual'
         self.toolbar_manager.panel_toggled.connect(self._on_panel_toggled)
         self.toolbar_manager.settings_toggled.connect(self._on_settings_toggled)
         self.toolbar_manager.graph_count_changed.connect(self._on_graph_count_changed)
@@ -2513,6 +2500,9 @@ Devam etmek istiyor musunuz?
             
         if hasattr(self.toolbar_manager, 'graph_settings_toggled'):
             self.toolbar_manager.graph_settings_toggled.connect(self._on_graph_settings_toggled)
+        
+        if hasattr(self.toolbar_manager, 'parameters_toggled'):
+            self.toolbar_manager.parameters_toggled.connect(self._on_parameters_toggled)
             
         # Connect new analysis panel signals
         if hasattr(self.toolbar_manager, 'correlations_toggled'):
@@ -2590,6 +2580,91 @@ Devam etmek istiyor musunuz?
         else:
             logger.warning(f"Could not find signal '{signal_name}' to change its color.")
             logger.warning(f"Available signals: {all_signal_names}")
+    
+    def _on_signal_remove_requested(self, signal_name: str, graph_index: int):
+        """
+        Handle request to remove a signal from a graph.
+        Called when user right-clicks on signal name in statistics panel.
+        """
+        logger.info(f"Remove requested for signal '{signal_name}' from graph {graph_index}")
+        
+        # Get current tab index
+        tab_index = self.tab_widget.currentIndex()
+        if tab_index < 0:
+            logger.warning("No active tab")
+            return
+        
+        # Remove signal from graph signal mapping
+        if tab_index in self.graph_signal_mapping:
+            if graph_index in self.graph_signal_mapping[tab_index]:
+                if signal_name in self.graph_signal_mapping[tab_index][graph_index]:
+                    self.graph_signal_mapping[tab_index][graph_index].remove(signal_name)
+                    logger.info(f"Removed '{signal_name}' from graph {graph_index} in tab {tab_index}")
+                    
+                    # Redraw graphs to reflect the change
+                    self._redraw_all_signals()
+                    
+                    # Update statistics panel
+                    self._recreate_statistics_panel()
+                    
+                    logger.info(f"Signal '{signal_name}' successfully removed from display")
+                else:
+                    logger.warning(f"Signal '{signal_name}' not found in graph {graph_index} mapping")
+            else:
+                logger.warning(f"Graph {graph_index} not found in tab {tab_index} mapping")
+        else:
+            logger.warning(f"Tab {tab_index} not found in graph signal mapping")
+    
+    def _on_graph_reorder_requested(self, from_index: int, to_index: int):
+        """Handle graph reorder request from statistics panel."""
+        logger.info(f"Graph reorder requested: Graph {from_index + 1} -> Graph {to_index + 1}")
+        tab_index = self.tab_widget.currentIndex()
+        if tab_index < 0:
+            return
+        
+        # Get active container
+        active_container = self.get_active_graph_container()
+        if not active_container:
+            logger.warning("No active container found for graph reordering")
+            return
+        
+        # Reorder graphs in PlotManager
+        active_container.plot_manager.reorder_graphs(from_index, to_index)
+        
+        # Update graph_signal_mapping to reflect new order
+        if tab_index in self.graph_signal_mapping:
+            # Swap the signal lists
+            signals_from = self.graph_signal_mapping[tab_index].get(from_index, []).copy()
+            signals_to = self.graph_signal_mapping[tab_index].get(to_index, []).copy()
+            
+            # Update mapping
+            self.graph_signal_mapping[tab_index][from_index] = signals_to
+            self.graph_signal_mapping[tab_index][to_index] = signals_from
+            
+            # Update cursor manager if it exists
+            if hasattr(self, 'cursor_manager') and self.cursor_manager:
+                # Cursor manager needs to be updated with new plot widget order
+                # The plot widgets are already reordered in PlotManager
+                plot_widgets = active_container.plot_manager.get_plot_widgets()
+                # Reinitialize cursor manager with new order
+                from src.managers.cursor_manager import CursorManager
+                old_cursor_manager = self.cursor_manager
+                self.cursor_manager = CursorManager(plot_widgets)
+                # Copy cursor positions if available
+                if hasattr(old_cursor_manager, 'dual_cursors_1') and hasattr(old_cursor_manager, 'dual_cursors_2'):
+                    # Cursor positions will be maintained by the plot widgets themselves
+                    pass
+                old_cursor_manager.deleteLater()
+            
+            # Mark data as modified
+            self.is_data_modified = True
+            
+            # Recreate statistics panel to reflect new order
+            self._recreate_statistics_panel()
+            
+            logger.info(f"Graphs reordered successfully: Graph {from_index + 1} <-> Graph {to_index + 1}")
+        else:
+            logger.warning(f"Tab {tab_index} not found in graph signal mapping")
 
     def _on_visible_columns_changed(self, visible_columns: set):
         """Handle changes to visible statistics columns."""

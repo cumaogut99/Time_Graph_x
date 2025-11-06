@@ -2,10 +2,10 @@
 """
 Cursor Manager for Time Analysis Widget
 
-Handles different cursor interaction modes:
-- Single Cursor: One movable vertical line
-- Dual Cursors: Two independent movable lines  
-- Range Selector: Shaded region with two boundaries
+Permanently uses dual cursor mode:
+- Dual Cursors: Two independent movable lines for precise analysis
+
+Note: 'none' and other modes have been removed - dual cursors are always active.
 """
 
 import logging
@@ -20,11 +20,7 @@ class CursorManager(QObject):
     """
     Manages cursor interactions for the time analysis plot.
     
-    Modes:
-    - none: No cursors active
-    - single: Single movable cursor line
-    - dual: Two independent cursor lines
-    - range: Range selection with shaded region
+    Permanently uses dual cursor mode with two independent cursor lines.
     """
     
     # Signals
@@ -36,7 +32,7 @@ class CursorManager(QObject):
         
         self.plot_widgets = plot_widgets  # List of plot widgets for stacked plots
         self.plots = plot_widgets  # Alias for compatibility
-        self.current_mode = "none"
+        self.current_mode = "dual"  # Permanently set to dual
         
         # Cursor objects (will be applied to all plots)
         self.dual_cursors_1 = []  # First dual cursor per plot
@@ -74,8 +70,13 @@ class CursorManager(QObject):
         Set the cursor interaction mode.
         
         Args:
-            mode: One of 'none', 'dual'
+            mode: Should always be 'dual' (other modes removed)
         """
+        # Only accept 'dual' mode - log warning if something else is requested
+        if mode != "dual":
+            logger.warning(f"Cursor mode '{mode}' not supported - using 'dual' instead")
+            mode = "dual"
+            
         logger.debug(f"Setting cursor mode to: {mode}")
         
         # Clear existing cursors first
@@ -87,13 +88,8 @@ class CursorManager(QObject):
         logger.debug(f"Cursor mode changed to: {mode}")
         logger.debug(f"Cursor lists after mode change - Cursor1: {len(self.dual_cursors_1) if self.dual_cursors_1 else 0}, Cursor2: {len(self.dual_cursors_2) if self.dual_cursors_2 else 0}")
 
-        # --- New logic to auto-create cursors ---
-        if mode == "dual":
-            self._auto_create_dual_cursors()
-        elif mode == "none":
-            # Ensure all cursors are completely removed
-            self._ensure_cursors_removed()
-            logger.debug("All cursors removed for 'none' mode")
+        # Auto-create dual cursors (mode is always 'dual')
+        self._auto_create_dual_cursors()
 
     def _auto_create_dual_cursors(self):
         """Creates two cursors at 1/3 and 2/3 of the current view."""
@@ -230,8 +226,7 @@ class CursorManager(QObject):
         if event.button() != 1:  # Only handle left clicks
             return
             
-        if self.current_mode == "none":
-            return
+        # Mode is always 'dual' - no need to check
             
         # Get the scene that sent the event
         event_scene = event.widget()
@@ -395,9 +390,13 @@ class CursorManager(QObject):
 
     def _emit_cursor_positions(self):
         """Emit current cursor positions."""
-        positions = self.get_cursor_positions()
-        if positions:
-            self.cursor_moved.emit(positions)
+        try:
+            positions = self.get_cursor_positions()
+            if positions:
+                self.cursor_moved.emit(positions)
+        except RuntimeError:
+            # Object has been deleted, ignore
+            pass
 
     def set_cursor_position(self, cursor_type: str, position: float):
         """Programmatically set cursor position."""
@@ -615,8 +614,9 @@ class CursorManager(QObject):
     
     def _on_view_range_changed(self, view_box, ranges):
         """Handle view range changes (pan/zoom) to keep cursors inside visible area."""
-        if not self.constrain_to_view or self.current_mode == "none":
+        if not self.constrain_to_view:
             return
+        # Mode is always 'dual' - no need to check mode
         
         try:
             # Get the new X range
