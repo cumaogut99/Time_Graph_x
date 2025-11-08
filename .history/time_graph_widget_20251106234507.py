@@ -1231,15 +1231,6 @@ class TimeGraphWidget(QWidget):
             for plot_widget in plot_widgets:
                 plot_widget.setMouseEnabled(x=plot_widget.getViewBox().state['mouseEnabled'][0], y=enabled)
         logger.info(f"Global Y axis mouse {'enabled' if enabled else 'disabled'} for all graphs")
-    
-    def _on_global_secondary_axis_changed(self, enabled: bool):
-        """Handle global secondary axis toggle."""
-        active_container = self.get_active_graph_container()
-        if active_container:
-            active_container.plot_manager.set_secondary_axis_enabled(enabled)
-            # Redraw all signals to apply axis assignment
-            self._redraw_all_signals()
-        logger.info(f"Global secondary axis {'enabled' if enabled else 'disabled'}")
 
     def _add_tab(self, name: Optional[str] = None):
         """Add a new tab with a GraphContainer."""

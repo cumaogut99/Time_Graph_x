@@ -451,7 +451,7 @@ class CorrelationsPanelManager:
             self.update_timer.start(500)  # 500ms delay to avoid too frequent updates
             
     def _calculate_correlations(self):
-        """Calculate correlations between target and other parameters."""
+        """Calculate correlations between target and other parameters using cursor range."""
         if not self.is_analysis_active or not self.target_parameter:
             return
             
@@ -475,12 +475,48 @@ class CorrelationsPanelManager:
                 self._update_results_display()
                 return
 
-            target_data = all_signals[self.target_parameter]['y_data']
-            correlations = {}
+            # Get cursor positions to determine data range
+            cursor_manager = getattr(self.parent, 'cursor_manager', None)
+            x_data_full = all_signals[self.target_parameter]['x_data']
+            target_data_full = all_signals[self.target_parameter]['y_data']
             
-            # Ensure target data is a 1D numpy array
-            if not isinstance(target_data, np.ndarray):
-                target_data = np.array(target_data)
+            # Ensure data is numpy array
+            if not isinstance(x_data_full, np.ndarray):
+                x_data_full = np.array(x_data_full)
+            if not isinstance(target_data_full, np.ndarray):
+                target_data_full = np.array(target_data_full)
+            
+            # Get cursor range if available
+            start_idx = 0
+            end_idx = len(target_data_full)
+            
+            if cursor_manager and hasattr(cursor_manager, 'can_zoom_to_cursors') and cursor_manager.can_zoom_to_cursors():
+                try:
+                    # Get cursor positions
+                    pos1 = cursor_manager.dual_cursors_1[0].value()
+                    pos2 = cursor_manager.dual_cursors_2[0].value()
+                    
+                    # Ensure proper order
+                    start_pos = min(pos1, pos2)
+                    end_pos = max(pos1, pos2)
+                    
+                    # Find indices for cursor range
+                    start_idx = np.searchsorted(x_data_full, start_pos, side='left')
+                    end_idx = np.searchsorted(x_data_full, end_pos, side='right')
+                    
+                    # Ensure valid indices
+                    start_idx = max(0, start_idx)
+                    end_idx = min(len(target_data_full), end_idx)
+                    
+                    logger.debug(f"Using cursor range: {start_pos:.3f} to {end_pos:.3f} (indices {start_idx}:{end_idx})")
+                except Exception as e:
+                    logger.warning(f"Failed to get cursor range, using full data: {e}")
+            else:
+                logger.debug("Cursors not available, using full data range")
+            
+            # Slice target data to cursor range
+            target_data = target_data_full[start_idx:end_idx]
+            correlations = {}
 
             total_signals = len(all_signals) - 1
             processed_signals = 0
@@ -490,9 +526,12 @@ class CorrelationsPanelManager:
                     continue
                 
                 try:
-                    other_data = signal_data['y_data']
-                    if not isinstance(other_data, np.ndarray):
-                        other_data = np.array(other_data)
+                    other_data_full = signal_data['y_data']
+                    if not isinstance(other_data_full, np.ndarray):
+                        other_data_full = np.array(other_data_full)
+                    
+                    # Slice other data to the same cursor range
+                    other_data = other_data_full[start_idx:end_idx]
 
                     # ROBUST: Ensure data lengths are equal for correlation calculation
                     min_len = min(len(target_data), len(other_data))

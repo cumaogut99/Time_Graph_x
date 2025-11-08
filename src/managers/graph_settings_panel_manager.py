@@ -35,6 +35,7 @@ class GraphSettingsPanelManager(QObject):
     global_line_width_changed = Signal(int) # width
     global_x_axis_mouse_changed = Signal(bool) # is_enabled
     global_y_axis_mouse_changed = Signal(bool) # is_enabled
+    global_secondary_axis_changed = Signal(bool) # is_enabled
 
     def __init__(self, parent_widget: "TimeGraphWidget"):
         super().__init__()
@@ -51,7 +52,8 @@ class GraphSettingsPanelManager(QObject):
             'snap_to_data': False,
             'line_width': 1,
             'x_axis_mouse': True,
-            'y_axis_mouse': True
+            'y_axis_mouse': True,
+            'secondary_axis': False
         }
         
         self._setup_settings_panel()
@@ -176,6 +178,12 @@ class GraphSettingsPanelManager(QObject):
         self.global_y_mouse_check.setChecked(self.global_settings['y_axis_mouse'])
         self.global_y_mouse_check.toggled.connect(self._on_global_y_mouse_toggled)
         layout.addWidget(self.global_y_mouse_check)
+        
+        # Secondary Axis checkbox
+        self.global_secondary_axis_check = QCheckBox("Enable Secondary Y-Axis")
+        self.global_secondary_axis_check.setChecked(self.global_settings['secondary_axis'])
+        self.global_secondary_axis_check.toggled.connect(self._on_global_secondary_axis_toggled)
+        layout.addWidget(self.global_secondary_axis_check)
         
         # Zoom to Cursors button
         self.zoom_to_cursors_button = QPushButton("🎯 Zoom to Cursors")
@@ -339,6 +347,12 @@ class GraphSettingsPanelManager(QObject):
         self.global_settings['y_axis_mouse'] = checked
         self.global_y_axis_mouse_changed.emit(checked)
         logger.info(f"Global Y axis mouse {'enabled' if checked else 'disabled'}")
+    
+    def _on_global_secondary_axis_toggled(self, checked):
+        """Handle global secondary axis toggle."""
+        self.global_settings['secondary_axis'] = checked
+        self.global_secondary_axis_changed.emit(checked)
+        logger.info(f"Global secondary axis {'enabled' if checked else 'disabled'}")
 
     def rebuild_controls(self, graph_count: int):
         """No longer needed - using global controls only."""

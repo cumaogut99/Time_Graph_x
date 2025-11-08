@@ -1427,17 +1427,23 @@ class PlotManager(QObject):
     def _setup_context_menu_for_plot(self, plot_widget, plot_index: int):
         """Setup custom context menu for plot widget with Zoom to Cursor option."""
         view_box = plot_widget.getViewBox()
-        menu = view_box.menu
         
-        # Add separator before custom actions
-        menu.addSeparator()
+        # Store original getContextMenus method
+        original_get_menus = view_box.getContextMenus
         
-        # Add "Zoom to Cursors" action
-        zoom_to_cursors_action = QAction("🎯 Zoom to Cursors", menu)
-        zoom_to_cursors_action.setToolTip("Zoom to the range between dual cursors")
-        
-        # Get cursor_manager - PlotManager.parent is GraphContainer
-        def get_cursor_manager():
+        def custom_get_menus(event):
+            """Custom context menu that adds Zoom to Cursor option."""
+            # Get default menus from PyQtGraph
+            menus = original_get_menus(event)
+            
+            # Create custom menu
+            custom_menu = QMenu()
+            
+            # Add "Zoom to Cursors" action
+            zoom_to_cursors_action = QAction("🎯 Zoom to Cursors", custom_menu)
+            zoom_to_cursors_action.setToolTip("Zoom to the range between dual cursors")
+            
+            # Get cursor_manager - PlotManager.parent is GraphContainer
             cursor_manager = None
             main_widget = None
             
@@ -1447,31 +1453,33 @@ class PlotManager(QObject):
             if main_widget and hasattr(main_widget, 'cursor_manager'):
                 cursor_manager = main_widget.cursor_manager
             
-            return cursor_manager
-        
-        # Connect action
-        def on_zoom_to_cursors():
-            cursor_manager = get_cursor_manager()
-            if cursor_manager and hasattr(cursor_manager, 'zoom_to_cursors'):
-                success = cursor_manager.zoom_to_cursors()
-                if success:
-                    logger.info("Zoomed to cursors from context menu")
-                else:
-                    logger.warning("Failed to zoom to cursors")
-        
-        zoom_to_cursors_action.triggered.connect(on_zoom_to_cursors)
-        
-        # Update button state when menu is about to show
-        def update_menu():
-            cursor_manager = get_cursor_manager()
+            # Check if zoom to cursors is available
             if cursor_manager and hasattr(cursor_manager, 'can_zoom_to_cursors'):
                 can_zoom = cursor_manager.can_zoom_to_cursors()
                 zoom_to_cursors_action.setEnabled(can_zoom)
             else:
                 zoom_to_cursors_action.setEnabled(False)
+            
+            # Connect action
+            def on_zoom_to_cursors():
+                if cursor_manager and hasattr(cursor_manager, 'zoom_to_cursors'):
+                    success = cursor_manager.zoom_to_cursors()
+                    if success:
+                        logger.info("Zoomed to cursors from context menu")
+                    else:
+                        logger.warning("Failed to zoom to cursors")
+            
+            zoom_to_cursors_action.triggered.connect(on_zoom_to_cursors)
+            custom_menu.addAction(zoom_to_cursors_action)
+            
+            # Add separator
+            custom_menu.addSeparator()
+            
+            # Return custom menu along with default menus
+            return [custom_menu] + (menus if menus else [])
         
-        menu.aboutToShow.connect(update_menu)
-        menu.addAction(zoom_to_cursors_action)
+        # Override getContextMenus
+        view_box.getContextMenus = custom_get_menus
         
         logger.debug(f"Custom context menu setup for plot {plot_index}")
 

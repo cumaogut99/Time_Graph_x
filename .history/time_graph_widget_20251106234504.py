@@ -1231,15 +1231,6 @@ class TimeGraphWidget(QWidget):
             for plot_widget in plot_widgets:
                 plot_widget.setMouseEnabled(x=plot_widget.getViewBox().state['mouseEnabled'][0], y=enabled)
         logger.info(f"Global Y axis mouse {'enabled' if enabled else 'disabled'} for all graphs")
-    
-    def _on_global_secondary_axis_changed(self, enabled: bool):
-        """Handle global secondary axis toggle."""
-        active_container = self.get_active_graph_container()
-        if active_container:
-            active_container.plot_manager.set_secondary_axis_enabled(enabled)
-            # Redraw all signals to apply axis assignment
-            self._redraw_all_signals()
-        logger.info(f"Global secondary axis {'enabled' if enabled else 'disabled'}")
 
     def _add_tab(self, name: Optional[str] = None):
         """Add a new tab with a GraphContainer."""
@@ -2544,7 +2535,7 @@ Devam etmek istiyor musunuz?
         self.graph_settings_panel_manager.global_line_width_changed.connect(self._on_global_line_width_changed)
         self.graph_settings_panel_manager.global_x_axis_mouse_changed.connect(self._on_global_x_mouse_changed)
         self.graph_settings_panel_manager.global_y_axis_mouse_changed.connect(self._on_global_y_mouse_changed)
-        self.graph_settings_panel_manager.global_secondary_axis_changed.connect(self._on_global_secondary_axis_changed)
+        self.graph_settings_panel_manager.global_secondary_axis_changed.connect(self._on_global_secondary_axis_changed)(self._on_global_y_mouse_changed)
 
         # Theme manager connections
         self.theme_manager.theme_changed.connect(self._on_theme_changed)

@@ -267,14 +267,13 @@ class PlotManager(QObject):
             # We'll manually trigger autoRange() when needed (e.g., on data load)
             plot_widget.enableAutoRange(axis='x', enable=False)
             
+            # Context menu setup removed - zoom functionality moved to Graph Settings panel
+            
             # Override ViewBox autoRange to use our custom reset_view() method
             # This ensures "View All" from right-click menu works properly with downsampled data
             view_box = plot_widget.getViewBox()
             view_box._original_autoRange = view_box.autoRange  # Backup original
             view_box.autoRange = lambda *args, **kwargs: self._custom_auto_range_for_plot(i, *args, **kwargs)
-            
-            # Setup custom context menu with "Zoom to Cursor" option
-            self._setup_context_menu_for_plot(plot_widget, i)
             
             # Setup tooltips for this plot widget using global setting
             tooltips_enabled = global_settings.get('show_tooltips', False)
@@ -1424,56 +1423,7 @@ class PlotManager(QObject):
                 signal_names.add(base_name)
         return list(signal_names)
 
-    def _setup_context_menu_for_plot(self, plot_widget, plot_index: int):
-        """Setup custom context menu for plot widget with Zoom to Cursor option."""
-        view_box = plot_widget.getViewBox()
-        menu = view_box.menu
-        
-        # Add separator before custom actions
-        menu.addSeparator()
-        
-        # Add "Zoom to Cursors" action
-        zoom_to_cursors_action = QAction("🎯 Zoom to Cursors", menu)
-        zoom_to_cursors_action.setToolTip("Zoom to the range between dual cursors")
-        
-        # Get cursor_manager - PlotManager.parent is GraphContainer
-        def get_cursor_manager():
-            cursor_manager = None
-            main_widget = None
-            
-            if hasattr(self.parent, 'main_widget'):
-                main_widget = self.parent.main_widget
-            
-            if main_widget and hasattr(main_widget, 'cursor_manager'):
-                cursor_manager = main_widget.cursor_manager
-            
-            return cursor_manager
-        
-        # Connect action
-        def on_zoom_to_cursors():
-            cursor_manager = get_cursor_manager()
-            if cursor_manager and hasattr(cursor_manager, 'zoom_to_cursors'):
-                success = cursor_manager.zoom_to_cursors()
-                if success:
-                    logger.info("Zoomed to cursors from context menu")
-                else:
-                    logger.warning("Failed to zoom to cursors")
-        
-        zoom_to_cursors_action.triggered.connect(on_zoom_to_cursors)
-        
-        # Update button state when menu is about to show
-        def update_menu():
-            cursor_manager = get_cursor_manager()
-            if cursor_manager and hasattr(cursor_manager, 'can_zoom_to_cursors'):
-                can_zoom = cursor_manager.can_zoom_to_cursors()
-                zoom_to_cursors_action.setEnabled(can_zoom)
-            else:
-                zoom_to_cursors_action.setEnabled(False)
-        
-        menu.aboutToShow.connect(update_menu)
-        menu.addAction(zoom_to_cursors_action)
-        
-        logger.debug(f"Custom context menu setup for plot {plot_index}")
+    # Context menu methods removed - zoom functionality moved to Graph Settings panel
 
     def set_legend_visibility(self, visible: bool):
         """Set legend visibility for all plots."""

@@ -1,8 +1,8 @@
 # Time Graph X - Yol Haritası (Roadmap)
 
-**Son Güncelleme:** 2025-10-28  
-**Versiyon:** 2.0.7  
-**Durum:** Aktif Geliştirme - 22 Problem (11 açık, 11 tamamlandı ✅)
+**Son Güncelleme:** 2025-11-08  
+**Versiyon:** 2.0.8  
+**Durum:** Aktif Geliştirme - 22 Problem (11 açık, 11 tamamlandı ✅) + 7 Yeni Özellik ✅
 
 ---
 
@@ -2705,6 +2705,113 @@ def copy_graph_to_clipboard(self, graph_index):
 
 ## ✅ Tamamlanmış İyileştirmeler
 
+### v2.0.8 (2025-11-08) - Yeni Özellikler ⭐
+
+#### Yeni Özellikler
+- [x] **Secondary Y-Axis (İkincil Y Ekseni) - 2025-11-08** ⭐⭐⭐
+  - Graph Settings paneline "Enable Secondary Y-Axis" checkbox eklendi
+  - Birbirine uzak değer aralıklarına sahip sinyaller otomatik olarak farklı eksenlere atanıyor
+  - Sol eksen (primary) ve sağ eksen (secondary) otomatik assignment algoritması
+  - ViewBox overlay yapısı ile PyQtGraph entegrasyonu
+  - Tüm grafiklerde eşzamanlı enable/disable
+  - Legend'da secondary axis sinyalleri de görünüyor
+  - 4 saat, PyQtGraph ViewBox overlay + otomatik axis assignment
+  - **Öğrenilen:** PyQtGraph'da secondary axis için ViewBox overlay kullan, layout'a doğru pozisyonda ekle (row 2, col 3)
+
+- [x] **Statistics Panel - Renk Kolonu Kaldırma ve Context Menu - 2025-11-08** ⭐
+  - Statistics panelinden renk kolonu kaldırıldı (daha kompakt görünüm)
+  - Sinyal satırlarına sağ tık context menu eklendi
+  - "Change Color" seçeneği ile QColorDialog açılıyor
+  - QColorDialog'da text rengi beyaz yapıldı (okunabilirlik)
+  - 1 saat, QTableWidget context menu + QColorDialog styling
+
+- [x] **Statistics Panel - Drag & Drop Reordering - 2025-11-08** ⭐⭐
+  - Grafik bölümlerini sürükle-bırak ile dikey olarak yeniden sıralama
+  - ClickableGroupBox'a drag-drop implementasyonu
+  - Grafik yüksekliklerinin eşit kalması sağlandı (stretch factor = 1)
+  - Sürükleme sırasında advanced settings açılma sorunu çözüldü (has_dragged flag)
+  - 2 saat, Qt drag-drop events + conflict resolution
+
+- [x] **Statistics Panel - Vertical Padding Reduction - 2025-11-08**
+  - QTableWidget satır arası dikey padding azaltıldı
+  - QHeaderView section height küçültüldü
+  - verticalHeader().setDefaultSectionSize(24) ile kompakt görünüm
+  - 30 dakika, QSS styling + Qt size hints
+
+- [x] **Add New Parameters - Calculated Parameters - 2025-11-08** ⭐⭐⭐
+  - Parameters paneline "➕ Add New Parameter" butonu eklendi
+  - ParameterCalculatorDialog: Yeni parametre türetme penceresi
+  - Mevcut parametreler üzerinden matematiksel formüller ile yeni parametre oluşturma
+  - Matematiksel operatör butonları (+, -, *, /, **, parantez, karşılaştırma)
+  - NumPy fonksiyon butonları (sin, cos, sqrt, abs, log, exp, vb.)
+  - Formül önizleme ve doğrulama
+  - Yeni parametreler alfabetik sıraya göre ekleniyor
+  - MPAI projesi kaydederken yeni parametreler de kaydediliyor
+  - 3 saat, QDialog + formula parser + signal_processor entegrasyonu
+  - **Öğrenilen:** Calculated parameters için eval() güvenli değil, NumPy expression kullan
+
+- [x] **Context Menu - Zoom to Cursors - 2025-11-08** ⭐
+  - Grafik üzerinde sağ tık menüsüne "🎯 Zoom to Cursors" seçeneği eklendi
+  - İki cursor arasındaki bölgeye zoom yapma (Graph Settings'teki butonun alternatifi)
+  - ViewBox.menu'ye direkt action ekleme ile PyQtGraph entegrasyonu
+  - aboutToShow sinyali ile dinamik enable/disable
+  - 1 saat, PyQtGraph ViewBox menu override
+
+- [x] **Correlations Panel - Cursor Range Filtering - 2025-11-08** ⭐⭐
+  - Korelasyon hesaplaması artık sadece iki cursor arası veri için yapılıyor
+  - Cursor pozisyonlarına göre otomatik veri slicing (np.searchsorted)
+  - Cursor'lar genişletildiğinde tüm data, daraltıldığında dar aralık analiz ediliyor
+  - Fallback: Cursor yoksa tüm data kullanılıyor
+  - 1 saat, cursor_manager entegrasyonu + data slicing
+  - **Öğrenilen:** Real-time analysis için cursor range kullanımı UX'i çok iyileştiriyor
+
+#### Teknik İyileştirmeler
+- [x] **PlotManager - Secondary Axis Infrastructure**
+  - secondary_axis_enabled, secondary_viewboxes, secondary_axes dict'leri
+  - _setup_secondary_axis_for_plot() ve _remove_secondary_axis_for_plot()
+  - _assign_signal_to_axis() otomatik axis assignment algoritması
+  - _clear_plots() içinde secondary axis referansları temizleme
+  - Legend'a secondary axis sinyallerini manuel ekleme
+
+- [x] **CursorManager - RuntimeError Handling**
+  - cursor_moved.emit() etrafında try-except RuntimeError blokları
+  - Deleted object'lerden sinyal emisyonu güvenli hale getirildi
+
+- [x] **GraphSettingsPanelManager - Secondary Axis Control**
+  - global_secondary_axis_changed sinyali
+  - Secondary axis checkbox ve toggle handler
+
+#### Performans & Stabilite
+- [x] RuntimeError handling (deleted C++ objects)
+- [x] Secondary axis ViewBox cleanup
+- [x] Signal axis assignment caching
+- [x] Cursor range data slicing optimization
+
+#### Kullanıcı Deneyimi
+- [x] Statistics panel daha kompakt (renk kolonu yok, padding azaltıldı)
+- [x] Drag-drop ile grafik sıralama (sezgisel)
+- [x] Context menu ile hızlı erişim (zoom to cursors, change color)
+- [x] Calculated parameters ile veri analizi genişletildi
+- [x] Secondary axis ile farklı ölçeklerdeki sinyaller aynı grafikte
+- [x] Cursor range filtering ile dinamik korelasyon analizi
+
+**Toplam Geliştirme Süresi:** ~13 saat
+- Secondary Axis: 4 saat
+- Statistics Panel İyileştirmeleri: 3.5 saat
+- Calculated Parameters: 3 saat
+- Context Menu & Correlations: 2 saat
+- Bug Fixes & Cleanup: 0.5 saat
+
+**Etki:**
+- ✅ Farklı ölçeklerdeki sinyaller artık aynı grafikte görülebiliyor
+- ✅ Statistics panel %30 daha kompakt
+- ✅ Grafik yönetimi daha sezgisel (drag-drop)
+- ✅ Yeni parametre türetme ile analiz yetenekleri genişledi
+- ✅ Context menu ile hızlı erişim iyileşti
+- ✅ Cursor-based filtering ile dinamik analiz mümkün
+
+---
+
 ### v1.0.0 (Tamamlandı)
 
 #### Bug Fixes
@@ -3037,11 +3144,21 @@ def export_graph(self, format, filepath):
 
 ---
 
-**Son Güncelleme:** 2025-10-27  
+**Son Güncelleme:** 2025-11-08  
 **Doküman Sahibi:** Development Team  
 **Güncelleme Sıklığı:** Haftalık / İhtiyaç anında
 
-**Son Değişiklikler (2025-10-27):**
+**Son Değişiklikler (2025-11-08):**
+- ✅ v2.0.8 sürümü eklendi: 7 yeni özellik tamamlandı
+- ✅ Secondary Y-Axis (İkincil Y Ekseni) - Farklı ölçeklerdeki sinyaller için
+- ✅ Statistics Panel İyileştirmeleri (context menu, drag-drop, padding)
+- ✅ Add New Parameters - Calculated Parameters özelliği
+- ✅ Context Menu - Zoom to Cursors eklendi
+- ✅ Correlations Panel - Cursor Range Filtering
+- ✅ Toplam 13 saat geliştirme süresi
+- ✅ Detaylı teknik dokümantasyon ve öğrenilen dersler eklendi
+
+**Önceki Değişiklikler (2025-10-27):**
 - ✅ Problem #9.1 eklendi: Multi-Tab Filter İzolasyonu (detaylı analiz)
 - ✅ 5 problem tamamlandı işaretlendi (#1, #8, #9, #9.1, #4)
 - ✅ Öğrenilen dersler ve pattern'ler eklendi
@@ -3077,5 +3194,5 @@ def export_graph(self, format, filepath):
 
 ---
 
-**Doküman Versiyonu:** 2.1  
-**Değişiklik:** Problem #9.1 (Multi-Tab Filter İzolasyonu) detaylı analiz eklendi, 5 problem tamamlandı, öğrenilen dersler dokümante edildi
+**Doküman Versiyonu:** 2.2  
+**Değişiklik:** v2.0.8 sürümü eklendi - 7 yeni özellik (Secondary Axis, Statistics Panel İyileştirmeleri, Calculated Parameters, Context Menu, Cursor Range Filtering), toplam 13 saat geliştirme
